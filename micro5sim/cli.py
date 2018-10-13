@@ -20,8 +20,7 @@ def _read_elf(filename, rom, ram, opts):
     """ Read all sections into the memory area they're contained in.
         Ignore any section that is fully outside all memory areas but 
         fail if any section is part in part out.
-        Also fail if nothing is loaded at the start of the ROM area.
-        Assume no section will straddle two memory areas.
+        Assume no section straddles two memory areas and areas don't overlap.
         Assume data in all sections is little endian.
 
         Return true if any instructions were loaded at the reset address.

@@ -6,8 +6,8 @@ import sys
 import m5cpu
 
 
-ADDR_ROM =      0x00000000
-ADDR_RAM =      0x40000000
+DEFAULT_ROM_ADDR =  0x00000000
+DEFAULT_RAM_ADDR =  0x40000000
 
 
 
@@ -16,10 +16,10 @@ class SoC(object):
     def __init__(self, rom=None, ram=None):
         self.rom = rom
         self.ram = ram
-        self.rom_bot = ADDR_ROM
-        self.rom_top = ADDR_ROM + len(rom)
-        self.ram_bot = ADDR_RAM
-        self.ram_top = ADDR_RAM + len(ram)
+        self.rom_bot = DEFAULT_ROM_ADDR
+        self.rom_top = DEFAULT_ROM_ADDR + len(rom)
+        self.ram_bot = DEFAULT_RAM_ADDR
+        self.ram_top = DEFAULT_RAM_ADDR + len(ram)
         self.cpu = m5cpu.CPU(self._load, self._store, self._log_delta, self._log_asm)
         self.delta_log_file = None
         self.asm_log_file = None

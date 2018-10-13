@@ -1,63 +1,131 @@
 #!/usr/bin/env python
 
 import argparse
+import struct
 import sys
 
+from elftools.elf.elffile import ELFFile
+from elftools.elf.constants import SH_FLAGS
+
 import m5soc
+import m5cpu
+
+DEFAULT_ROM_ADDR =  m5soc.DEFAULT_ROM_ADDR
+DEFAULT_ROM_WORDS = 256*1024
+DEFAULT_RAM_ADDR =  m5soc.DEFAULT_RAM_ADDR
+DEFAULT_RAM_WORDS = 64*1024
 
 
-def _read_rom_verilog(filename):
-    """Read ROM image file in Verilig's readmemh-compatible format.
-    One line per 32-bit word in plain binary, hexadecimal.
-    Empty (whitespace-only) line equivalent to zero.
-    Returns list of words (ints).
+def _read_elf(filename, rom, ram, opts):
+    """ Read all sections into the memory area they're contained in.
+        Ignore any section that is fully outside all memory areas but 
+        fail if any section is part in part out.
+        Also fail if nothing is loaded at the start of the ROM area.
+        Assume no section will straddle two memory areas.
+        Assume data in all sections is little endian.
+
+        Return true if any instructions were loaded at the reset address.
     """
-
-    words = []
-    fi = None
-
     try:
         fi = open(filename)
-        lines = fi.readlines()
-        words = [0] * len(lines)
-        for index, line in enumerate(lines):
-            line = line.strip()
-            if len(line) > 0:
-                words[index] = int(line, 16) 
-    except Exception as e:
-        print >> sys.stderr, "Error reading ROM file:"
+        elf = ELFFile(fi)
+
+        # Display some info in a format resembling riscvOVPsim's.
+        print "Read object file '%s'" % filename
+        print "Sections loaded:"
+        print "  Area          Section           Address     MemSize"
+
+
+        executable_stuff_at_reset_addr = False
+        for section in elf.iter_sections():
+            addr = section.header['sh_addr']
+            size = section.header['sh_size']
+            flags = section.header['sh_flags']
+
+            # Ignore any sections not meant to be loaded to memory.
+            if not (flags & SH_FLAGS.SHF_ALLOC): continue
+
+            # Remember if we load instructions on the reset address.
+            if (flags & SH_FLAGS.SHF_EXECINSTR):            
+                if m5cpu.ADDR_RESET >= addr and m5cpu.ADDR_RESET < (addr + size):
+                    executable_stuff_at_reset_addr = True
+
+            # Find out which area contains this section.
+            if addr >= opts.rom_addr and (addr+size) < (opts.rom_addr + opts.rom_size):
+                # Section is within ROM area.
+
+                # Fail if a writeable section wants to live in ROM area.
+                # FIXME optionally, when cli is complete
+                #if (flags & SH_FLAGS.SHF_WRITE):
+                #    print "Section '%s' is writeable " % (section.name)
+                #    #sys.exit(0)
+
+                # Otherwise just copy the little endian stuff
+                _load_section_data(section, addr - opts.rom_addr, rom)
+                _print_section_info(section, "ROM")
+
+            elif addr >= opts.ram_addr and (addr+size) < (opts.ram_addr + opts.ram_size):
+                # Section is within RAM area.
+                # Just copy the section to RAM. Even if it is read-only.
+                _load_section_data(section, addr - opts.rom_addr, ram)
+                _print_section_info(section, "RAM")
+        
+            else:
+                # Not fully contained by ROM or RAM areas.
+                # If there's any overlap then fail, otherwise ignore section.
+                pass
+                # FIXME fail on overlap
+
+        fi.close()
+
+    except IOError as e:
+        print >> sys.stderr, "Error reading elf file:"
         print >> sys.stderr, str(e)
         sys.exit(2)
-    finally:
-        if fi: fi.close()
 
-    return words
+    return executable_stuff_at_reset_addr
+
+
+def _print_section_info(section, area):
+    print "  %-12s  %-16s  0x%08x  0x%08x" % (area, section.name, section.header['sh_addr'], section.header['sh_size'])    
+
+
+def _load_section_data(section, offset, mem):
+    data = bytearray()
+    data.extend(section.data())
+    for j in range(len(data)/4):
+        i = j * 4
+        word = (data[i+0]<<0) | (data[i+1]<<8) | (data[i+2]<<16) | (data[i+3]<<24)
+        mem[j] = word
+
 
 
 
 #~~~~ Command Line Interface ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# File format argument choices + reader functions.
-ROM_FILE_READERS = {
-    'verilog-hex': _read_rom_verilog
-    }
-# Default RAM size in words.
-DEFAULT_RAM_SIZE = 64*1024
+
+
 
 def _parse_cmdline():
 
     parser = argparse.ArgumentParser(
-        description='Load ROM image on micro5 ISS and run it from reset',
+        description='Simulator for micro5 risc-v core',
         epilog="See README.md for a longer description.")
 
-    parser.add_argument('rom', metavar="ROM-FILE", type=str,
-        help="ROM image file")
-    parser.add_argument('--format', 
-        help="select format of ROM file. Defaults to '%s'" % 'verilog-hex', 
-        choices=ROM_FILE_READERS.keys(), default='verilog-hex')
+    parser.add_argument('elf', metavar="ELF-FILE", type=str,
+        help="Executable (elf) file")
+    parser.add_argument('--rom-addr', metavar="NUM",
+        help="base address of ROM area. Defaults to 0x%08x" % (DEFAULT_ROM_ADDR),
+        type=int, default=DEFAULT_ROM_ADDR)
+    parser.add_argument('--rom-size', metavar="NUM",
+        help="size of ROM area in 32-bit words. Defaults to %d KB" % (DEFAULT_ROM_WORDS/256),
+        type=int, default=DEFAULT_ROM_WORDS)
+    parser.add_argument('--ram-addr', metavar="NUM",
+        help="base address of RAM area. Defaults to 0x%08x" % (DEFAULT_RAM_ADDR),
+        type=int, default=DEFAULT_ROM_ADDR)
     parser.add_argument('--ram-size', metavar="NUM",
-        help="size of RAM area in 32-bit words. Defaults to %d KB" % (DEFAULT_RAM_SIZE/256),
-        type=int, default=DEFAULT_RAM_SIZE)
+        help="size of RAM area in 32-bit words. Defaults to %d KB" % (DEFAULT_RAM_WORDS/256),
+        type=int, default=DEFAULT_RAM_WORDS)
     parser.add_argument('--num-inst', metavar="NUM",
         help="maximum number of instructions to execute. Defaults to unlimited",
         type=int, default=None)
@@ -71,8 +139,12 @@ def main():
     """Entry point when installed as package."""
     opts = _parse_cmdline()
     
-    rom = ROM_FILE_READERS[opts.format](opts.rom)
+    rom = [0] * opts.rom_size
     ram = [0] * opts.ram_size
+
+    if not _read_elf(opts.elf, rom, ram, opts):
+        print >> sys.stderr, "No executable instructions at reset address."
+        sys.exit(4)
 
     soc = m5soc.SoC(rom, ram)
 

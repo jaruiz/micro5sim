@@ -14,6 +14,6 @@ setup(name=                 'micro5sim',
                                     'micro5sim=micro5sim.cli:main'
                                 ],
                             },
-      install_requires=     [],
+      install_requires=     ["pyelftools"],
       zip_safe=             True
       )

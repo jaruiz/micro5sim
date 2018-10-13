@@ -52,22 +52,24 @@ def _read_elf(filename, rom, ram, opts):
             # Find out which area contains this section.
             if addr >= opts.rom_addr and (addr+size) < (opts.rom_addr + opts.rom_size):
                 # Section is within ROM area.
-
+                _print_section_info(section, "ROM")
+                
                 # Fail if a writeable section wants to live in ROM area.
-                # FIXME optionally, when cli is complete
-                #if (flags & SH_FLAGS.SHF_WRITE):
-                #    print "Section '%s' is writeable " % (section.name)
-                #    #sys.exit(0)
+                # FIXME pass option on to mcu object!
+                if not opts.rom_writeable and (flags & SH_FLAGS.SHF_WRITE):
+                    print "Error: Section '%s' in ROM area is writeable" % (section.name)
+                    sys.exit(5)
 
                 # Otherwise just copy the little endian stuff
-                _load_section_data(section, addr - opts.rom_addr, rom)
-                _print_section_info(section, "ROM")
+                _load_section_data(section, addr - opts.ram_addr, rom)
+                
 
             elif addr >= opts.ram_addr and (addr+size) < (opts.ram_addr + opts.ram_size):
                 # Section is within RAM area.
+                _print_section_info(section, "RAM")
                 # Just copy the section to RAM. Even if it is read-only.
                 _load_section_data(section, addr - opts.rom_addr, ram)
-                _print_section_info(section, "RAM")
+                
         
             else:
                 # Not fully contained by ROM or RAM areas.
@@ -128,6 +130,9 @@ def _parse_cmdline():
     parser.add_argument('--num-inst', metavar="NUM",
         help="maximum number of instructions to execute. Defaults to unlimited",
         type=int, default=None)
+    parser.add_argument('--rom-writeable', action="store_true",
+        help="make ROM area writeable (effectively a second RAM area). Defaults to False",
+        default=False)
 
     args = parser.parse_args()
 

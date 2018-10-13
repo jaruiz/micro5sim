@@ -127,7 +127,7 @@ class CPU(object):
 
 
     def _fetch(self):
-        instruction = self._load(self.PC)
+        instruction = self._load(self.PC, space='c')
         self.PC_next = self.PC + 4
         return instruction
 

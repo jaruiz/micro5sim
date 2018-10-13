@@ -11,8 +11,22 @@ import m5cpu
 
 DEFAULT_ROM_ADDR =  0x00000000
 DEFAULT_ROM_WORDS = 256*1024
-DEFAULT_RAM_ADDR =  0x40000000
-DEFAULT_RAM_WORDS = 64*1024
+DEFAULT_RAM_ADDR =  0x80000000
+DEFAULT_RAM_WORDS = 512*1024
+
+
+SYMBOL_INTERCEPT_FETCH_CALLBACKS = {
+    'write_tohost': "_intercept_write_tohost"
+}
+
+SYMBOL_INTERCEPT_FETCH = {}
+
+SYMBOL_VALUE = {
+    'begin_signature': None,
+    'end_signature': None
+}
+
+
 
 
 class SoC(object):
@@ -21,9 +35,9 @@ class SoC(object):
         self.rom = rom
         self.ram = ram
         self.rom_bot = DEFAULT_ROM_ADDR
-        self.rom_top = DEFAULT_ROM_ADDR + len(rom)
+        self.rom_top = DEFAULT_ROM_ADDR + DEFAULT_ROM_WORDS
         self.ram_bot = DEFAULT_RAM_ADDR
-        self.ram_top = DEFAULT_RAM_ADDR + len(ram)
+        self.ram_top = DEFAULT_RAM_ADDR + DEFAULT_RAM_WORDS
         self.cpu = m5cpu.CPU(self._load, self._store, self._log_delta, self._log_asm)
         self.delta_log_file = None
         self.asm_log_file = None
@@ -50,6 +64,7 @@ class SoC(object):
             fi = open(filename)
             elf = ELFFile(fi)
 
+
             # Display some info in a format resembling riscvOVPsim's.
             print "Read object file '%s'" % filename
             print "Sections loaded:"
@@ -61,6 +76,17 @@ class SoC(object):
                 addr = section.header['sh_addr']
                 size = section.header['sh_size']
                 flags = section.header['sh_flags']
+
+                # There's a number of symbol values we want to know. Watch out
+                # for tymbol tables anx extract them. 
+                if section['sh_type'] == 'SHT_SYMTAB':
+                    for symbol in section.iter_symbols():
+                        if symbol.name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
+                            callback = SYMBOL_INTERCEPT_FETCH_CALLBACKS[symbol.name]
+                            SYMBOL_INTERCEPT_FETCH[symbol.entry['st_value']] = callback
+                        if symbol.name in SYMBOL_VALUE:
+                            SYMBOL_VALUE[symbol.name] = symbol.entry['st_value']
+
 
                 # Ignore any sections not meant to be loaded to memory.
                 if not (flags & SH_FLAGS.SHF_ALLOC): continue
@@ -107,14 +133,17 @@ class SoC(object):
         return executable_stuff_at_reset_addr
 
 
-    def _load(self, addr):
-        windex = addr / 4
-        if self.rom_bot <= windex < self.rom_top:
-            return self.rom[windex - self.rom_bot]
-        elif self.rom_bot <= windex < self.rom_top:
-            return self.ram[windex - self.ram_bot]
+    def _load(self, addr, space='d'):
+        if space == 'c' and  addr in SYMBOL_INTERCEPT_FETCH:
+            getattr(self, SYMBOL_INTERCEPT_FETCH[addr])()
+
+        if self.rom_bot <= addr < self.rom_top:
+            return self.rom[(addr - self.rom_bot)/4]
+        elif self.ram_bot <= addr < self.ram_top:
+            return self.ram[(addr - self.ram_bot)/4]
         else:
             return 0
+
 
     def _store(self, addr, value, lanes=4):
         masks = [0xff, 0xff, 0xffff, 0xffff, 0xffffffff]
@@ -123,19 +152,19 @@ class SoC(object):
         mask = masks[lanes] << (bindex * 8)
         value = (value << (bindex * 8)) & mask
 
-        if self.rom_bot <= windex < self.rom_top:
-            word = self.rom[windex - self.rom_bot]
+        if self.rom_bot <= addr < self.rom_top:
+            word = self.rom[(addr - self.rom_bot)/4]
             word = (word & ~mask) | value
             if self.rom_writeable:
-                self.rom[windex - self.rom_bot] = word
+                self.rom[(addr - self.rom_bot)/4] = word
             else:
                 # Storing to read-only ROM area. Ignore.
                 print "[0x%08x] warning: writing to read-only address 0x%08x" % (self.PC, addr)
 
-        elif self.rom_bot <= windex < self.rom_top:
-            word = self.ram[windex - self.ram_bot]
+        elif self.ram_bot <= addr < self.ram_top:
+            word = self.ram[(addr - self.ram_bot)/4]
             word = (word & ~mask) | value
-            self.ram[windex - self.ram_bot] = word
+            self.ram[(addr - self.ram_bot)/4] = word
         elif addr == 0x10000000: # FIXME parameter
             # FIXME to file
             sys.stdout.write("%c" % (value & 0xff))
@@ -164,3 +193,29 @@ class SoC(object):
             word = (data[i+0]<<0) | (data[i+1]<<8) | (data[i+2]<<16) | (data[i+3]<<24)
             mem[j] = word
 
+    def _intercept_write_tohost(self):
+        """Generate signature file."""
+
+        sig_bot = SYMBOL_VALUE['begin_signature']
+        sig_top = SYMBOL_VALUE['end_signature']
+
+        if sig_top == None:
+            print >> sys.stderr, "Can't build signature file: missing symbol 'begin_signature'."
+        elif sig_bot == None:
+            print >> sys.stderr, "Can't build signature file: missing symbol 'end_signature'."
+        elif sig_bot > sig_top:
+            print >> sys.stderr, "Can't build signature file: begin and end symbols reversed."
+        else:
+            # FIXME use a file and display some context
+            print "%08x -- %08x" % (sig_bot, sig_top)
+            sig_size = (sig_top - sig_bot) / 4
+            cols = 0
+            for n in range(sig_size):
+                w = self._load(sig_bot + n)
+                print "%08x" % w,
+                cols = cols + 1
+                if cols == 4:
+                    cols = 0
+                    print
+
+        sys.exit(0)

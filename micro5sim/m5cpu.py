@@ -19,6 +19,7 @@ OPCODES = {
     0b1110011: ("_format_i", "_op_env"),
     0b1100011: ("_format_b", "_op_branch"),
     0b0010111: ("_format_u", "_op_auipc"),
+    0b0001111: ("_format_i", "_op_fence"),
 }
 
 ALU_OPS = {
@@ -61,6 +62,7 @@ ENV_OPS = {
     0b000:  ("csrrw", "_op_etrap",),
     0b001:  ("csrrw", "_op_csrrw",),
     0b010:  ("csrrw", "_op_csrrs",),
+    0b101:  ("csrrw", "_op_csrrwi",),
 }
 
 RN = [
@@ -360,7 +362,20 @@ class CPU(object):
         self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
 
 
+    def _op_csrrwi(self, rs1, mnemo):
+        if self._rd:
+            csr = self._read_csr(self._imm)
+            self._writeback(self._rd, csr)
+
+        value = self._rs1
+        if ((value >> 5) & 0x1) != 0:
+            value = (value | 0xffffffe0) & 0xffffffff
+        self._write_csr(self._imm, value)
+        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, value)
+
+
     def _op_csrrs(self, rs1, mnemo):
+        csr = 0
         if self._rd:
             csr = self._read_csr(self._imm)
             self._writeback(self._rd, csr)
@@ -374,7 +389,9 @@ class CPU(object):
         elif self._func7 == 0b0100000:
             return self._op_ebreak(rs1)
         elif self._func7 == 0b0001000:
-            return self._op_eret(rs1)
+            return self._op_eret(rs1) # FIXME to be removed
+        elif self._func7 == 0b0011000:
+            return self._op_mret(rs1)
         else:
             self._unimplemented_func73()
 
@@ -402,6 +419,11 @@ class CPU(object):
         self.PC_next = self._read_csr(CSR_MEPC)
         self._asm = "eret %s" % (RN[self._rs1])
 
+    def _op_mret(self, rs1):
+        # FIXME check rs1, rd are zero, rs2==0x2
+        self.PC_next = self._read_csr(CSR_MEPC)
+        self._asm = "mret %s" % (RN[self._rs1])
+
 
     def _op_lui(self):
         self._writeback(self._rd, self._imm)
@@ -411,6 +433,11 @@ class CPU(object):
     def _op_auipc(self):
         self._writeback(self._rd, self.PC + self._imm)
         self._asm = "auipc %s, 0x%x" % (RN[self._rd], self._imm)
+
+
+    def _op_fence(self):
+        # Implemented as NOP.
+        self._asm = "fence"
 
 
     def _op_jal(self):

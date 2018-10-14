@@ -1,4 +1,5 @@
 // RISC-V Compliance Test Header File
+// (Slightly modified version of existing header; keeping copyright notice.)
 // Copyright (c) 2017, Codasip Ltd. All Rights Reserved.
 // See LICENSE for license details.
 //

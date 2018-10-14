@@ -12,14 +12,20 @@
 # this default value should not be necessary.
 RISCV_PREFIX ?= /opt/riscv32i/bin/riscv32-unknown-elf-
 
-# We only care about the rv32i test suite.
-# FIXME exclude all uneeded tests from the suite.
+# We only build the rv32i test suite.
 TEST_DIR = riscv-compliance/riscv-test-suite/rv32i/src
 TEST_FILES = $(wildcard $(TEST_DIR)/*.S)
 TEST_SRC = $(basename $(notdir $(TEST_FILES)))
 TEST_OBJ = $(addprefix work/, $(addsuffix .o,$(TEST_SRC)))
 TEST_ELF = $(addprefix work/, $(addsuffix .elf,$(TEST_SRC)))
 TEST_LST = $(addprefix work/, $(addsuffix .lst,$(TEST_SRC)))
+
+# These are the test cases that are relevant to micro5sim.
+# FIXME sort out which tests can be omitted.
+CASE_NAMES = $(TEST_SRC)
+CASE_GOALS = $(addprefix work/, $(addsuffix .run,$(CASE_NAMES)))
+
+
 
 
 work/%.lst: work/%.elf
@@ -46,19 +52,17 @@ work:
 all: work $(TEST_OBJ) $(TEST_ELF) $(TEST_LST) $(TEST_FILES)
 
 
-CASE_NAMES = $(TEST_SRC)
-CASE_LOGS = $(addprefix work/, $(addsuffix .log,$(CASE_NAMES)))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-run: $(CASE_LOGS)
+.PHONY: run
+run: $(CASE_GOALS)
 
-work/%.log: work/%.elf
+# Run all elevant tests against micro5sim checking signatures.
+.PHONY: work/%.run
+work/%.run: work/%.elf
 	python ../micro5sim/cli.py --rom-writeable \
 		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
 		$<
-
-
-
-
 
 # Run rv32i suite on ovpsim.
 # You do not need this to get the signature references, those are pre-built.

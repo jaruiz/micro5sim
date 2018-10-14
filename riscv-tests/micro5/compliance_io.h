@@ -1,5 +1,7 @@
 // RISC-V Compliance IO Test Header File
 
+// (Slightly modified version of existing header; keeping copyright notice.)
+
 /*
  * Copyright (c) 2005-2018 Imperas Software Ltd., www.imperas.com
  *

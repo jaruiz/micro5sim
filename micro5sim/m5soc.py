@@ -9,14 +9,15 @@ from elftools.elf.constants import SH_FLAGS
 import m5cpu
 
 
-DEFAULT_ROM_ADDR =  0x00000000
-DEFAULT_ROM_WORDS = 256*1024
-DEFAULT_RAM_ADDR =  0x80000000
+DEFAULT_ROM_ADDR =  0x80000000
+DEFAULT_ROM_WORDS = 1024*1024
+DEFAULT_RAM_ADDR =  0xc0000000
 DEFAULT_RAM_WORDS = 512*1024
 
 
 SYMBOL_INTERCEPT_FETCH_CALLBACKS = {
-    'write_tohost': "_intercept_write_tohost"
+    'write_tohost': "_intercept_write_tohost",
+    'write_to_host': "_intercept_write_tohost",
 }
 
 SYMBOL_INTERCEPT_FETCH = {}
@@ -42,8 +43,11 @@ class SoC(object):
         self.delta_log_file = None
         self.asm_log_file = None
         self.rom_writeable = False
+        self.trace_list = None
+        self.signature_reference = None
 
     def reset(self):
+        self.cpu.trace_list = self.trace_list
         self.cpu.reset()
 
 
@@ -138,11 +142,12 @@ class SoC(object):
             getattr(self, SYMBOL_INTERCEPT_FETCH[addr])()
 
         if self.rom_bot <= addr < self.rom_top:
+            #print "<%08x, %08x, %08x>" % (addr, self.rom_bot, self.rom[0])
             return self.rom[(addr - self.rom_bot)/4]
         elif self.ram_bot <= addr < self.ram_top:
             return self.ram[(addr - self.ram_bot)/4]
         else:
-            return 0
+            return 0x42000000
 
 
     def _store(self, addr, value, lanes=4):
@@ -191,13 +196,37 @@ class SoC(object):
         for j in range(len(data)/4):
             i = j * 4
             word = (data[i+0]<<0) | (data[i+1]<<8) | (data[i+2]<<16) | (data[i+3]<<24)
-            mem[j] = word
+            mem[j + offset/4] = word
+
 
     def _intercept_write_tohost(self):
         """Generate signature file."""
 
+        if self.signature_reference:
+            sig_ref = self._compute_signature()
+            
+            if sig_ref != None:
+                if len(sig_ref) != len(self.signature_reference):
+                    print >> sys.stderr, "Signature area boundary MISMATCH."
+                    sys.exit(9)
+                for i in range(len(sig_ref)):
+                    r0 = sig_ref[i].strip().lower()
+                    r1 = self.signature_reference[i].strip().lower()
+                    if r0 != r1:
+                        print >> sys.stderr, "Signature MISMATCH."
+                        sys.exit(9)
+
+            print "Signature MATCH."
+    
+
+        # FIXME exit message, use exceptions
+        sys.exit(0)
+
+    def _compute_signature(self):
         sig_bot = SYMBOL_VALUE['begin_signature']
         sig_top = SYMBOL_VALUE['end_signature']
+
+        sig_ref = None
 
         if sig_top == None:
             print >> sys.stderr, "Can't build signature file: missing symbol 'begin_signature'."
@@ -206,16 +235,16 @@ class SoC(object):
         elif sig_bot > sig_top:
             print >> sys.stderr, "Can't build signature file: begin and end symbols reversed."
         else:
-            # FIXME use a file and display some context
-            print "%08x -- %08x" % (sig_bot, sig_top)
-            sig_size = (sig_top - sig_bot) / 4
-            cols = 0
-            for n in range(sig_size):
-                w = self._load(sig_bot + n)
-                print "%08x" % w,
-                cols = cols + 1
-                if cols == 4:
-                    cols = 0
-                    print
+            # Area seems legit. Compute signature as list of ascii lines.
+            print "Computing signature for area [0x%08x .. 0x%08x]" % (sig_bot, sig_top)
+            sig_ref = []
+            num_lines = (sig_top - sig_bot) / 16
+            for line in range(num_lines):
+                trc = []
+                for wi in range(4):
+                    address = sig_bot + (line * 16) + ((3 - wi) * 4)
+                    w = self._load(address)
+                    trc.append("%08x" % w)
+                sig_ref.append("".join(trc))
 
-        sys.exit(0)
+        return sig_ref

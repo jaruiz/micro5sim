@@ -4,8 +4,8 @@ import argparse
 import sys
 
 
-ADDR_RESET =    0x00000000
-ADDR_TRAP =     0x00000010
+ADDR_RESET =    0x80000000
+ADDR_TRAP =     0x80000004
 
 
 OPCODES = {
@@ -65,12 +65,18 @@ ENV_OPS = {
     0b101:  ("csrrw", "_op_csrrwi",),
 }
 
+# Register name by index. Used in the disassembly generation.
 RN = [
     "zero", "ra",   "sp",   "gp",   "tp",   "t0",   "t1",   "t2",
     "fp",   "s1",   "a0",   "a1",   "a2",   "a3",   "a4",   "a5",
     "a6",   "a7",   "s2",   "s3",   "s4",   "s5",   "s6",   "s7",
     "s8",   "s9",   "s10",  "s11",  "t3",   "t4",   "t5",   "t6" 
     ]
+
+# Register index by name. Like RN except some regs have multiple names.
+RIX = {n:i for i,n in enumerate(RN)}
+RIX['s0'] = 8
+
 
 CSR_MSTATUS =   0x300
 CSR_MEPC =      0x341
@@ -85,15 +91,15 @@ CSR = {
 }
 
 
-
-
-
-
 class CPU(object):
 
     def __init__(self, load, store, delta, log_asm):
         self.PC = ADDR_RESET
         self.PC_next = ADDR_RESET
+        self.trace_start_addr = None
+        self.trace_list = None
+        self._trace_index = 0
+        self._trace_enable = False
         self._load = load
         self._store = store
         self._log_delta = delta
@@ -122,12 +128,30 @@ class CPU(object):
             self.PC = self.PC_next
 
 
+    def _fail_trace_check(self, tpoint, msg):
+        print >> sys.stderr, "[%08x / %08x] %s" % (self.PC, tpoint.addr, msg)
+        sys.exit(9)
+
+    def _check_trace(self, addr, rindex, rvalue):
+        tpoint = self.trace_list[self._trace_index]
+        if addr != tpoint.addr:
+            self._fail_trace_check(tpoint, "unexpected trace point address")
+        if rindex != tpoint.reg:
+            self._fail_trace_check(tpoint, "reg %s index mismatch" % RN[tpoint.reg])
+        if rvalue != tpoint.post:
+            self._fail_trace_check(tpoint, "reg %s value mismatch (%08x != %08x)" % (RN[tpoint.reg], rvalue, tpoint.post))
+
+        self._trace_index = self._trace_index + 1
+
+
+
     def _build_asm(self, instruction):
         return "[0x%08x] %08x    %s" % (self.PC, instruction, self._asm)
 
 
     def _fetch(self):
         instruction = self._load(self.PC, space='c')
+        if self.PC == self.trace_start_addr: self._trace_enable = True
         self.PC_next = self.PC + 4
         return instruction
 
@@ -202,6 +226,9 @@ class CPU(object):
     def _writeback(self, rd, value):
         if rd: 
             value = value & 0xffffffff
+            if self.trace_list and self._trace_enable:
+                if value != self._rbank[rd]:
+                    self._check_trace(self.PC, rd, value)
             self._rbank[rd] = value
             self._log_delta(self.PC, rd, value)
 
@@ -398,7 +425,7 @@ class CPU(object):
 
     def _op_ecall(self, rs1):
         # FIXME check rs1, rd are zero
-        self._do_trap(0x00)
+        self._do_trap(0x0b)
         self._asm = "ecall %s" % (RN[self._rs1])
 
 

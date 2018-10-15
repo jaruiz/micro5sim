@@ -83,6 +83,7 @@ RIX['s0'] = 8
 
 
 CSR_MSTATUS =   0x300
+CSR_MISA =      0x301
 CSR_MTVEC =     0x305
 CSR_MSCRATCH =  0x340
 CSR_MEPC =      0x341
@@ -92,6 +93,7 @@ CSR_MIP =       0x344
 
 CSR = {
     CSR_MSTATUS: 0,
+    CSR_MISA: 0,                # Hardcoded.
     CSR_MTVEC: ADDR_TRAP,
     CSR_MSCRATCH: 0,
     CSR_MEPC: 0,
@@ -463,9 +465,9 @@ class CPU(object):
 
 
     def _op_etrap(self, rs1, mnemo):
-        if self._func7 == 0b0000000:
+        if self._imm == 0b000000000000:
             return self._op_ecall(rs1)
-        elif self._func7 == 0b0100000:
+        elif self._imm == 0b000000000001:
             return self._op_ebreak(rs1)
         elif self._func7 == 0b0001000:
             return self._op_eret(rs1) # FIXME to be removed

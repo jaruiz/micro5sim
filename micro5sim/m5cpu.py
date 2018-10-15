@@ -530,18 +530,20 @@ class CPU(object):
 
 
     def _op_jal(self):
-        self._writeback(self._rd, self.PC_next)
+        saved_pc = self.PC_next
         self.PC_next = (self.PC + self._imm) & 0xffffffff
+        self._writeback(self._rd, saved_pc)
         self._asm = "jal %s, 0x%x" % (RN[self._rd], self.PC_next)
 
 
     def _op_jalr(self):
         if self._func3 != 0:
             _unimplemented_func3()
-        self._writeback(self._rd, self.PC_next)
+        saved_pc = self.PC_next
         rs1 = self._rbank[self._rs1]
         self.PC_next = (rs1 + self._imm) & 0xfffffffe
-        self._asm = "jalr %s, %s, 0x%x" % (RN[self._rd], RN[self._rs1], self._imm)
+        self._writeback(self._rd, saved_pc)
+        self._asm = "jalr %s, %s, 0x%x; 0x%08x" % (RN[self._rd], RN[self._rs1], self._imm, self.PC_next)
 
 
     def _op_lbu(self, a, b):

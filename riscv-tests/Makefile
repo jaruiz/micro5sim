@@ -60,7 +60,7 @@ run: $(CASE_GOALS)
 # Run all elevant tests against micro5sim checking signatures.
 .PHONY: work/%.run
 work/%.run: work/%.elf
-	python ../micro5sim/cli.py --rom-writeable \
+	-python ../micro5sim/cli.py --rom-writeable \
 		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
 		$<
 

@@ -2,6 +2,8 @@
 
 import argparse
 import collections
+import os.path
+import posix
 import re
 import struct
 import sys
@@ -10,10 +12,19 @@ import m5soc
 import m5cpu
 
 
+# Custom exit codes (apart from the Posix standard ones).
+EX_UNIMPLEMENTED =      10
+EX_TRACE_MISMATCH =     12
+EX_SIG_MISMATCH =       13
+EX_NOEXEC_AT_RESET =    20
+
+
+
+# REs used to parse OVPsim trace lines...
 RE_TRACE = re.compile(r"^Info\s+'[\w/]+',\s+0x([0-9a-fA-F]+)\([\w+]+\):\s+([0-9a-fA-F]+)(.*)$")
 RE_TRACECHANGE = re.compile(r"^Info\s+(\w+)\s+([0-9a-fA-F]+)\s+->\s+([0-9a-fA-F]+)$")
 
-
+# ...and named tuple holding a single trace entry.
 TracePoint = collections.namedtuple("TracePoint", ["reg", "pre", "post", "addr", "bin", "asm"])
 
 
@@ -27,46 +38,41 @@ def _read_ovp_trace(filename):
     This is a very ad-hoc debugging aid that will probably require tinkering
     with the test sources. It'll be covered by the test scripts, though.
     """
-    try:
-        fi = open(filename, "r")
-        line_prev = None
-        trace_list = []
-        enable = False
-        for line in fi.readlines():
-            if line.find("->") > 0:
-                match = RE_TRACECHANGE.match(line)
-                if match:
-                    reg_name = match.group(1)
-                    reg_pre = int(match.group(2), 16)
-                    reg_post = int(match.group(3), 16)
 
-                    reg_ix = None if not reg_name in m5cpu.RIX else m5cpu.RIX[reg_name]
-                    if reg_ix == None: continue
+    fi = open(filename, "r")
+    line_prev = None
+    trace_list = []
+    enable = False
+    for line in fi.readlines():
+        if line.find("->") > 0:
+            match = RE_TRACECHANGE.match(line)
+            if match:
+                reg_name = match.group(1)
+                reg_pre = int(match.group(2), 16)
+                reg_post = int(match.group(3), 16)
 
-                    (addr, instruction, asm) = (0xffffffff, 0x0, "???")
+                reg_ix = None if not reg_name in m5cpu.RIX else m5cpu.RIX[reg_name]
+                if reg_ix == None: continue
 
-                    if line_prev:
-                        match = RE_TRACE.match(line_prev)
-                        if match:
-                            addr = int(match.group(1), 16)
-                            instruction = int(match.group(2), 16)
-                            asm = match.group(3)
-                            if addr == 0x80000108: enable = True
+                (addr, instruction, asm) = (0xffffffff, 0x0, "???")
 
-                    tp = TracePoint(reg_ix, reg_pre, reg_post, addr, instruction, asm)
+                if line_prev:
+                    match = RE_TRACE.match(line_prev)
+                    if match:
+                        addr = int(match.group(1), 16)
+                        instruction = int(match.group(2), 16)
+                        asm = match.group(3)
+                        if addr == 0x80000108: enable = True
 
-                    if enable:
-                        trace_list.append(tp)
+                tp = TracePoint(reg_ix, reg_pre, reg_post, addr, instruction, asm)
 
-            line_prev = line
+                if enable:
+                    trace_list.append(tp)
 
-        fi.close()
-        return trace_list
+        line_prev = line
 
-    except IOError as e:
-        print >> sys.stderr, "Error reading ovp trace file:"
-        print >> sys.stderr, str(e)
-        sys.exit(2)
+    fi.close()
+    return trace_list
 
 
 def _load_sig_ref(filename):
@@ -77,9 +83,9 @@ def _load_sig_ref(filename):
         return ref
 
     except IOError as e:
-        print >> sys.stderr, "Error reading signature reference file:"
-        print >> sys.stderr, str(e)
-        sys.exit(2)
+        print "ERROR: Trouble reading signature reference file:"
+        print str(e)
+        sys.exit(posix.EX_IOERR)
 
 
 
@@ -132,11 +138,15 @@ def main():
     """Entry point when installed as package."""
     opts = _parse_cmdline()
 
-    if opts.ovpsim_trace:
-        trace_list = _read_ovp_trace(opts.ovpsim_trace)
-    else:
-        trace_list = None
-    
+    case_name = os.path.basename(opts.elf).split(".")[0]
+
+    try:
+        if opts.ovpsim_trace:
+            trace_list = _read_ovp_trace(opts.ovpsim_trace)
+        else:
+            trace_list = None
+    except IOError as e:
+        _error(case_name, "Trouble reading ovp trace file: " + str(e), posix.EX_IOERR)
 
     rom = [0] * opts.rom_size
     ram = [0] * opts.ram_size
@@ -150,20 +160,45 @@ def main():
     if opts.sig_ref:
         soc.signature_reference = _load_sig_ref(opts.sig_ref)
 
-
-    if not soc.read_elf(opts.elf):
-        print >> sys.stderr, "No executable instructions at reset address."
-        sys.exit(4)
+    try:
+        if not soc.read_elf(opts.elf):
+            print "ERROR: No executable instructions at reset address."
+            sys.exit(EX_NOEXEC_AT_RESET)
+    except IOError as e:
+        print "ERROR: Trouble reading elf file:"
+        print str(e)
+        sys.exit(posix.EX_IOERR)
+    except m5soc.SoCELFError as e:
+        print "ERROR: " + str(e)
+        sys.exit(posix.EX_IOERR)
 
     soc.delta_log_file = open("log.txt", "w")
     soc.asm_log_file = open("trace.txt", "w")
 
-    soc.reset()
-    soc.run(opts.num_inst)
+    try:
+        soc.reset()
+        soc.run(opts.num_inst)
+    except m5cpu.CPUUnimplemented as e:
+        _error(case_name, str(e), EX_UNIMPLEMENTED)
+    except m5cpu.CPUTraceMismatch as e:
+        _error(case_name, str(e), EX_TRACE_MISMATCH)
+    except m5soc.SoCQuitSigMismatch as e:
+        _error(case_name, str(e), EX_SIG_MISMATCH)
+    except m5soc.SoCQuit as e:
+        _quit(case_name, str(e), posix.EX_OK)
+
+
+def _error(case_name, msg, ecode):
+    print "ERROR (%s):  %s" % (case_name, msg)
+    sys.exit(ecode)
+
+def _quit(case_name, msg, ecode):
+    print "QUIT  (%s):  %s" % (case_name, msg)
+    sys.exit(ecode)
 
 
 if __name__ == "__main__":
     """Entry point when run as plain script (development only)."""
     main()
     print
-    sys.exit(0)
+    _quit(case_name, "Normal termination", posix.EX_OK)

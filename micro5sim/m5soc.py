@@ -28,6 +28,29 @@ SYMBOL_VALUE = {
 }
 
 
+class SoCError(Exception):
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
+
+class SoCELFError(SoCError):
+    """Something is wrong in the elf file other than an IOError."""
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
+
+class SoCQuit(SoCError):
+    """Program hit any of the normal or abnormal termination conditions."""
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
+
+class SoCQuitSigMatch(SoCQuit):
+    """Program Quit, signature match."""
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
+
+class SoCQuitSigMismatch(SoCQuit):
+    """Program Quit, signature mismatch."""
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
 
 
 class SoC(object):
@@ -63,76 +86,70 @@ class SoC(object):
             Assume data in all sections is little endian.
 
             Return true if any instructions were loaded at the reset address.
+            May raise IOError.
         """
-        try:
-            fi = open(filename)
-            elf = ELFFile(fi)
+
+        fi = open(filename)
+        elf = ELFFile(fi)
 
 
-            # Display some info in a format resembling riscvOVPsim's.
-            print "Read object file '%s'" % filename
-            print "Sections loaded:"
-            print "  Area          Section           Address     MemSize"
+        # Display some info in a format resembling riscvOVPsim's.
+        print "Read object file '%s'" % filename
+        print "Sections loaded:"
+        print "  Area          Section           Address     MemSize"
 
 
-            executable_stuff_at_reset_addr = False
-            for section in elf.iter_sections():
-                addr = section.header['sh_addr']
-                size = section.header['sh_size']
-                flags = section.header['sh_flags']
+        executable_stuff_at_reset_addr = False
+        for section in elf.iter_sections():
+            addr = section.header['sh_addr']
+            size = section.header['sh_size']
+            flags = section.header['sh_flags']
 
-                # There's a number of symbol values we want to know. Watch out
-                # for tymbol tables anx extract them. 
-                if section['sh_type'] == 'SHT_SYMTAB':
-                    for symbol in section.iter_symbols():
-                        if symbol.name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
-                            callback = SYMBOL_INTERCEPT_FETCH_CALLBACKS[symbol.name]
-                            SYMBOL_INTERCEPT_FETCH[symbol.entry['st_value']] = callback
-                        if symbol.name in SYMBOL_VALUE:
-                            SYMBOL_VALUE[symbol.name] = symbol.entry['st_value']
+            # There's a number of symbol values we want to know. Watch out
+            # for tymbol tables and extract them.
+            if section['sh_type'] == 'SHT_SYMTAB':
+                for symbol in section.iter_symbols():
+                    if symbol.name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
+                        callback = SYMBOL_INTERCEPT_FETCH_CALLBACKS[symbol.name]
+                        SYMBOL_INTERCEPT_FETCH[symbol.entry['st_value']] = callback
+                    if symbol.name in SYMBOL_VALUE:
+                        SYMBOL_VALUE[symbol.name] = symbol.entry['st_value']
 
 
-                # Ignore any sections not meant to be loaded to memory.
-                if not (flags & SH_FLAGS.SHF_ALLOC): continue
+            # Ignore any sections not meant to be loaded to memory.
+            if not (flags & SH_FLAGS.SHF_ALLOC): continue
 
-                # Remember if we load instructions on the reset address.
-                if (flags & SH_FLAGS.SHF_EXECINSTR):            
-                    if m5cpu.ADDR_RESET >= addr and m5cpu.ADDR_RESET < (addr + size):
-                        executable_stuff_at_reset_addr = True
+            # Remember if we load instructions on the reset address.
+            if (flags & SH_FLAGS.SHF_EXECINSTR):
+                if m5cpu.ADDR_RESET >= addr and m5cpu.ADDR_RESET < (addr + size):
+                    executable_stuff_at_reset_addr = True
 
-                # Find out which area contains this section.
-                if addr >= self.rom_bot and (addr+size) < self.rom_top:
-                    # Section is within ROM area.
-                    self._print_section_info(section, "ROM")
-                    
-                    # Fail if a writeable section wants to live in ROM area.
-                    if not self.rom_writeable and (flags & SH_FLAGS.SHF_WRITE):
-                        print "Error: Section '%s' in ROM area is writeable" % (section.name)
-                        sys.exit(5)
+            # Find out which area contains this section.
+            if addr >= self.rom_bot and (addr+size) < self.rom_top:
+                # Section is within ROM area.
+                self._print_section_info(section, "ROM")
 
-                    # Otherwise just copy the little endian stuff
-                    self._load_section_data(section, addr - self.rom_bot, self.rom)
-                    
+                # Fail if a writeable section wants to live in ROM area.
+                if not self.rom_writeable and (flags & SH_FLAGS.SHF_WRITE):
+                    msg = "Error: Section '%s' in ROM area is writeable" % (section.name)
+                    raise SoCELFError(msg)
 
-                elif addr >= self.ram_bot and (addr+size) < self.ram_top:
-                    # Section is within RAM area.
-                    self._print_section_info(section, "RAM")
-                    # Just copy the section to RAM. Even if it is read-only.
-                    self._load_section_data(section, addr - self.ram_bot, self.ram)
-                    
-            
-                else:
-                    # Not fully contained by ROM or RAM areas.
-                    # If there's any overlap then fail, otherwise ignore section.
-                    pass
-                    # FIXME fail on overlap
+                # Otherwise just copy the little endian stuff
+                self._load_section_data(section, addr - self.rom_bot, self.rom)
 
-            fi.close()
+            elif addr >= self.ram_bot and (addr+size) < self.ram_top:
+                # Section is within RAM area.
+                self._print_section_info(section, "RAM")
+                # Just copy the section to RAM. Even if it is read-only.
+                self._load_section_data(section, addr - self.ram_bot, self.ram)
 
-        except IOError as e:
-            print >> sys.stderr, "Error reading elf file:"
-            print >> sys.stderr, str(e)
-            sys.exit(2)
+            else:
+                # Not fully contained by ROM or RAM areas.
+                # If there's any overlap then fail, otherwise ignore section.
+                pass
+                # FIXME fail on overlap
+
+        fi.close()
 
         return executable_stuff_at_reset_addr
 
@@ -207,20 +224,23 @@ class SoC(object):
             
             if sig_ref != None:
                 if len(sig_ref) != len(self.signature_reference):
-                    print >> sys.stderr, "Signature area boundary MISMATCH."
-                    sys.exit(9)
+                    raise SoCQuitSigMismatch("Signature area boundary MISMATCH")
+
                 for i in range(len(sig_ref)):
                     r0 = sig_ref[i].strip().lower()
                     r1 = self.signature_reference[i].strip().lower()
                     if r0 != r1:
-                        print >> sys.stderr, "Signature MISMATCH."
-                        sys.exit(9)
+                        raise SoCQuitSigMismatch("Signature MISMATCH")
 
-            print "Signature MATCH."
+                raise SoCQuitSigMatch("Signature MATCH")
+
+            else:
+                # This will have raised an exception by now but just in case.
+                raise SoCQuitSigMismatch("Could not compute signature")
     
+        # Intercepted write_tohost but no signature ref on cmd line.
+        raise SoCQuit("No signature reference supplied")
 
-        # FIXME exit message, use exceptions
-        sys.exit(0)
 
     def _compute_signature(self):
         sig_bot = SYMBOL_VALUE['begin_signature']
@@ -229,11 +249,11 @@ class SoC(object):
         sig_ref = None
 
         if sig_top == None:
-            print >> sys.stderr, "Can't build signature file: missing symbol 'begin_signature'."
+            raise SoCQuitSigMismatch("Can't build signature file: missing symbol 'begin_signature'")
         elif sig_bot == None:
-            print >> sys.stderr, "Can't build signature file: missing symbol 'end_signature'."
+            raise SoCQuitSigMismatch("Can't build signature file: missing symbol 'end_signature'")
         elif sig_bot > sig_top:
-            print >> sys.stderr, "Can't build signature file: begin and end symbols reversed."
+            raise SoCQuitSigMismatch("Can't build signature file: begin and end symbols reversed")
         else:
             # Area seems legit. Compute signature as list of ascii lines.
             print "Computing signature for area [0x%08x .. 0x%08x]" % (sig_bot, sig_top)

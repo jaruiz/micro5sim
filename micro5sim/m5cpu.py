@@ -79,16 +79,36 @@ RIX['s0'] = 8
 
 
 CSR_MSTATUS =   0x300
+CSR_MTVEC =     0x305
+CSR_MSCRATCH =  0x340
 CSR_MEPC =      0x341
 CSR_MCAUSE =    0x342
 CSR_MIP =       0x344
 
 CSR = {
     CSR_MSTATUS: 0,
+    CSR_MTVEC: ADDR_TRAP,
+    CSR_MSCRATCH: 0,
     CSR_MEPC: 0,
     CSR_MCAUSE: 0,
     CSR_MIP: 0
 }
+
+
+
+class CPUError(Exception):
+    def __init__(self, msg):
+        super(CPUError, self).__init__(msg)
+
+class CPUUnimplemented(CPUError):
+    """Tried to use some instruction or CSR that is unimplemented."""
+    def __init__(self, msg):
+        super(CPUError, self).__init__(msg)
+
+class CPUTraceMismatch(CPUError):
+    """Mismatch while comparing with reference trace (not signature)."""
+    def __init__(self, msg):
+        super(CPUError, self).__init__(msg)
 
 
 class CPU(object):
@@ -129,8 +149,8 @@ class CPU(object):
 
 
     def _fail_trace_check(self, tpoint, msg):
-        print >> sys.stderr, "[%08x / %08x] %s" % (self.PC, tpoint.addr, msg)
-        sys.exit(9)
+        raise CPUTraceMismatch("[%08x / %08x] %s" % (self.PC, tpoint.addr, msg))
+
 
     def _check_trace(self, addr, rindex, rvalue):
         tpoint = self.trace_list[self._trace_index]
@@ -186,23 +206,23 @@ class CPU(object):
 
 
     def _unimplemented_func3(self):
-        print "[0x{0:08x}] UNIMPLEMENTED IMM FUNC3 {1:03b} WITH OPCODE {2:07b}".format(self.PC, self._func3, self._opcode)
-        sys.exit(0)
+        msg = "[0x{0:08x}] UNIMPLEMENTED IMM FUNC3 {1:03b} WITH OPCODE {2:07b}".format(self.PC, self._func3, self._opcode)
+        raise CPUUnimplemented(msg)
 
 
     def _unimplemented_func73(self):
-        print "[0x{0:08x}] UNIMPLEMENTED IMM FUNC7+FUNC3 {1:07b}::{2:03b} WITH OPCODE {3:07b}".format(self.PC, self._func7, self._func3, self._opcode)
-        sys.exit(0)        
+        msg = "[0x{0:08x}] UNIMPLEMENTED IMM FUNC7+FUNC3 {1:07b}::{2:03b} WITH OPCODE {3:07b}".format(self.PC, self._func7, self._func3, self._opcode)
+        raise CPUUnimplemented(msg)
 
 
     def _unimplemented_csr(self, csr):
-        print "[0x{0:08x}] UNIMPLEMENTED CSR 0x{1:03x}".format(self.PC, csr)
-        sys.exit(0)
+        msg = "[0x{0:08x}] UNIMPLEMENTED CSR 0x{1:03x}".format(self.PC, csr)
+        raise CPUUnimplemented(msg)
 
 
     def _unimplemented_opcode(self):
-        print "[0x{0:08x}] UNIMPLEMENTED OPCODE {1:07b}".format(self.PC, self._opcode)
-        sys.exit(0)
+        msg = "[0x{0:08x}] UNIMPLEMENTED OPCODE {1:07b}".format(self.PC, self._opcode)
+        raise CPUUnimplemented(msg)
 
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,7 +458,7 @@ class CPU(object):
     def _do_trap(self, cause):
         self._write_csr(CSR_MEPC, self.PC)
         self._write_csr(CSR_MCAUSE, cause)
-        self.PC_next = ADDR_TRAP
+        self.PC_next = CSR[CSR_MTVEC]
 
 
     def _op_eret(self, rs1):

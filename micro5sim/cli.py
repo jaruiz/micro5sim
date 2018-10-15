@@ -75,20 +75,6 @@ def _read_ovp_trace(filename):
     return trace_list
 
 
-def _load_sig_ref(filename):
-    try:
-        fi = open(filename, "r")
-        ref = fi.readlines()
-        fi.close()
-        return ref
-
-    except IOError as e:
-        print "ERROR: Trouble reading signature reference file:"
-        print str(e)
-        sys.exit(posix.EX_IOERR)
-
-
-
 
 #~~~~ Command Line Interface ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -157,20 +143,21 @@ def main():
     soc.trace_list = trace_list
     soc.trace_start_addr = opts.trace_start
 
-    if opts.sig_ref:
-        soc.signature_reference = _load_sig_ref(opts.sig_ref)
+    try:
+        if opts.sig_ref:
+            fi = open(opts.sig_ref, "r")
+            soc.signature_reference = fi.readlines()
+            fi.close()
+    except IOError as e:
+        _error(case_name, "Trouble reading signature reference file: " + str(e), posix.EX_IOERR)
 
     try:
         if not soc.read_elf(opts.elf):
-            print "ERROR: No executable instructions at reset address."
-            sys.exit(EX_NOEXEC_AT_RESET)
+            _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
     except IOError as e:
-        print "ERROR: Trouble reading elf file:"
-        print str(e)
-        sys.exit(posix.EX_IOERR)
+        _error(case_name, "Trouble reading elf file: " + str(e), posix.EX_IOERR)
     except m5soc.SoCELFError as e:
-        print "ERROR: " + str(e)
-        sys.exit(posix.EX_IOERR)
+        _error(case_name, str(e), posix.EX_IOERR)
 
     soc.delta_log_file = open("log.txt", "w")
     soc.asm_log_file = open("trace.txt", "w")

@@ -20,6 +20,7 @@ OPCODES = {
     0b1100011: ("_format_b", "_op_branch"),
     0b0010111: ("_format_u", "_op_auipc"),
     0b0001111: ("_format_i", "_op_fence"),
+    0b0001011: ("_format_i", "_op_custom"),
 }
 
 ALU_OPS = {
@@ -62,6 +63,7 @@ ENV_OPS = {
     0b000:  ("csrrw", "_op_etrap",),
     0b001:  ("csrrw", "_op_csrrw",),
     0b010:  ("csrrw", "_op_csrrs",),
+    0b011:  ("csrrw", "_op_csrrc",),
     0b101:  ("csrrw", "_op_csrrwi",),
 }
 
@@ -83,6 +85,7 @@ CSR_MTVEC =     0x305
 CSR_MSCRATCH =  0x340
 CSR_MEPC =      0x341
 CSR_MCAUSE =    0x342
+CSR_MTVAL =     0x343
 CSR_MIP =       0x344
 
 CSR = {
@@ -91,6 +94,7 @@ CSR = {
     CSR_MSCRATCH: 0,
     CSR_MEPC: 0,
     CSR_MCAUSE: 0,
+    CSR_MTVAL: 0,
     CSR_MIP: 0
 }
 
@@ -430,6 +434,15 @@ class CPU(object):
         self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
 
 
+    def _op_csrrc(self, rs1, mnemo):
+        csr = 0
+        if self._rd:
+            csr = self._read_csr(self._imm)
+            self._writeback(self._rd, csr)
+        self._write_csr(self._imm, csr & ~rs1) # FIXME writable mask
+        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+
+
     def _op_etrap(self, rs1, mnemo):
         if self._func7 == 0b0000000:
             return self._op_ecall(rs1)
@@ -445,13 +458,15 @@ class CPU(object):
 
     def _op_ecall(self, rs1):
         # FIXME check rs1, rd are zero
+        CSR[CSR_MTVAL] = 0
         self._do_trap(0x0b)
         self._asm = "ecall %s" % (RN[self._rs1])
 
 
     def _op_ebreak(self, rs1):
         # FIXME check rs1, rd are zero
-        self._do_trap(0x01)
+        CSR[CSR_MTVAL] = self.PC
+        self._do_trap(0x03)
         self._asm = "ebreak %s" % (RN[self._rs1])
 
 
@@ -485,6 +500,14 @@ class CPU(object):
     def _op_fence(self):
         # Implemented as NOP.
         self._asm = "fence"
+
+
+    def _op_custom(self):
+        # Only one custom instruction implemented: putc(r10)
+        # FIXME check encoding as 0x0005200B.
+        sys.stdout.write("%c" % self._rbank[10])
+        sys.stdout.flush()
+        self._asm = "custom-putc a0"
 
 
     def _op_jal(self):

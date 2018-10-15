@@ -60,11 +60,13 @@ BRANCH_OPS = {
 }
 
 ENV_OPS = {
-    0b000:  ("csrrw", "_op_etrap",),
+    0b000:  ("etrap", "_op_etrap",),
     0b001:  ("csrrw", "_op_csrrw",),
-    0b010:  ("csrrw", "_op_csrrs",),
-    0b011:  ("csrrw", "_op_csrrc",),
-    0b101:  ("csrrw", "_op_csrrwi",),
+    0b010:  ("csrrs", "_op_csrrs",),
+    0b011:  ("csrrc", "_op_csrrc",),
+    0b101:  ("csrrwi", "_op_csrrwi",),
+    0b110:  ("csrrsi", "_op_csrrsi",),
+    0b111:  ("csrrci", "_op_csrrci",),
 }
 
 # Register name by index. Used in the disassembly generation.
@@ -413,34 +415,51 @@ class CPU(object):
         self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
 
 
+    def _op_csrrs(self, rs1, mnemo):
+        csr = self._read_csr(self._imm)
+        if self._rd:
+            self._writeback(self._rd, csr)
+        if self._rs1:
+            self._write_csr(self._imm, csr | rs1) # FIXME writable mask
+        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+
+
+    def _op_csrrc(self, rs1, mnemo):
+        csr = self._read_csr(self._imm)
+        if self._rd:
+            self._writeback(self._rd, csr)
+        if self._rs1:
+            self._write_csr(self._imm, csr & ~rs1) # FIXME writable mask
+        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+
+
     def _op_csrrwi(self, rs1, mnemo):
         if self._rd:
             csr = self._read_csr(self._imm)
             self._writeback(self._rd, csr)
 
-        value = self._rs1
-        if ((value >> 5) & 0x1) != 0:
-            value = (value | 0xffffffe0) & 0xffffffff
-        self._write_csr(self._imm, value)
-        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, value)
+        self._write_csr(self._imm, self._rs1)
+        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
 
 
-    def _op_csrrs(self, rs1, mnemo):
-        csr = 0
+    def _op_csrrsi(self, rs1, mnemo):
+        csr = self._read_csr(self._imm)
         if self._rd:
-            csr = self._read_csr(self._imm)
             self._writeback(self._rd, csr)
-        self._write_csr(self._imm, csr | rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+        
+        if self._rs1:
+            self._write_csr(self._imm, csr | self._rs1) # FIXME writable mask
+        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
 
 
-    def _op_csrrc(self, rs1, mnemo):
-        csr = 0
+    def _op_csrrci(self, rs1, mnemo):
+        csr = self._read_csr(self._imm)
         if self._rd:
-            csr = self._read_csr(self._imm)
             self._writeback(self._rd, csr)
-        self._write_csr(self._imm, csr & ~rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+        if self._rs1:
+            self._write_csr(self._imm, csr & ~self._rs1) # FIXME writable mask
+        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
+
 
 
     def _op_etrap(self, rs1, mnemo):

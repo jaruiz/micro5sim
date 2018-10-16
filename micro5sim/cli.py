@@ -17,6 +17,7 @@ EX_UNIMPLEMENTED =      10
 EX_TRACE_MISMATCH =     12
 EX_SIG_MISMATCH =       13
 EX_NOEXEC_AT_RESET =    20
+EX_PROGRAM_TERMINATED = 129
 
 
 
@@ -128,61 +129,66 @@ def _parse_cmdline():
 
 def main():
     """Entry point when installed as package."""
-    opts = _parse_cmdline()
-
-    case_name = os.path.basename(opts.elf).split(".")[0]
-
     try:
-        if opts.ovpsim_trace:
-            trace_list = _read_ovp_trace(opts.ovpsim_trace)
-        else:
-            trace_list = None
-    except IOError as e:
-        _error(case_name, "Trouble reading ovp trace file: " + str(e), posix.EX_IOERR)
+        opts = _parse_cmdline()
 
-    rom = [0] * opts.rom_size
-    ram = [0] * opts.ram_size
+        case_name = os.path.basename(opts.elf).split(".")[0]
 
-    soc = m5soc.SoC(rom, ram)
+        try:
+            if opts.ovpsim_trace:
+                trace_list = _read_ovp_trace(opts.ovpsim_trace)
+            else:
+                trace_list = None
+        except IOError as e:
+            _error(case_name, "Trouble reading ovp trace file: " + str(e), posix.EX_IOERR)
 
-    soc.rom_writeable = opts.rom_writeable
-    soc.trace_list = trace_list
-    soc.trace_start_addr = opts.trace_start
-    soc.rom_bot = opts.rom_addr
-    soc.ram_bot = opts.ram_addr
-    soc.cpu.reset_addr = opts.reset_addr
-    soc.cpu.trap_addr = opts.trap_addr
+        rom = [0] * opts.rom_size
+        ram = [0] * opts.ram_size
 
-    try:
-        if opts.sig_ref:
-            fi = open(opts.sig_ref, "r")
-            soc.signature_reference = fi.readlines()
-            fi.close()
-    except IOError as e:
-        _error(case_name, "Trouble reading signature reference file: " + str(e), posix.EX_IOERR)
+        soc = m5soc.SoC(rom, ram)
 
-    try:
-        if not soc.read_elf(opts.elf):
-            _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
-    except IOError as e:
-        _error(case_name, "Trouble reading elf file: " + str(e), posix.EX_IOERR)
-    except m5soc.SoCELFError as e:
-        _error(case_name, str(e), posix.EX_IOERR)
+        soc.rom_writeable = opts.rom_writeable
+        soc.trace_list = trace_list
+        soc.trace_start_addr = opts.trace_start
+        soc.rom_bot = opts.rom_addr
+        soc.ram_bot = opts.ram_addr
+        soc.cpu.reset_addr = opts.reset_addr
+        soc.cpu.trap_addr = opts.trap_addr
 
-    soc.delta_log_file = open("log.txt", "w")
-    soc.asm_log_file = open("trace.txt", "w")
+        try:
+            if opts.sig_ref:
+                fi = open(opts.sig_ref, "r")
+                soc.signature_reference = fi.readlines()
+                fi.close()
+        except IOError as e:
+            _error(case_name, "Trouble reading signature reference file: " + str(e), posix.EX_IOERR)
 
-    try:
-        soc.reset()
-        soc.run(opts.num_inst)
-    except m5cpu.CPUUnimplemented as e:
-        _error(case_name, str(e), EX_UNIMPLEMENTED)
-    except m5cpu.CPUTraceMismatch as e:
-        _error(case_name, str(e), EX_TRACE_MISMATCH)
-    except m5soc.SoCQuitSigMismatch as e:
-        _error(case_name, str(e), EX_SIG_MISMATCH)
-    except m5soc.SoCQuit as e:
-        _quit(case_name, str(e), posix.EX_OK)
+        try:
+            if not soc.read_elf(opts.elf):
+                _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
+        except IOError as e:
+            _error(case_name, "Trouble reading elf file: " + str(e), posix.EX_IOERR)
+        except m5soc.SoCELFError as e:
+            _error(case_name, str(e), posix.EX_IOERR)
+
+        soc.delta_log_file = open("log.txt", "w")
+        soc.asm_log_file = open("trace.txt", "w")
+
+        try:
+            soc.reset()
+            soc.run(opts.num_inst)
+        except m5cpu.CPUUnimplemented as e:
+            _error(case_name, str(e), EX_UNIMPLEMENTED)
+        except m5cpu.CPUTraceMismatch as e:
+            _error(case_name, str(e), EX_TRACE_MISMATCH)
+        except m5soc.SoCQuitSigMismatch as e:
+            _error(case_name, str(e), EX_SIG_MISMATCH)
+        except m5soc.SoCQuit as e:
+            _quit(case_name, str(e), posix.EX_OK)
+
+    except KeyboardInterrupt:
+        print
+        _error(case_name, "Terminated by user", EX_PROGRAM_TERMINATED)
 
 
 def _error(case_name, msg, ecode):
@@ -199,3 +205,6 @@ if __name__ == "__main__":
     main()
     print
     _quit(case_name, "Normal termination", posix.EX_OK)
+
+
+    

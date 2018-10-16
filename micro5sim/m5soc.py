@@ -70,6 +70,8 @@ class SoC(object):
         self.signature_reference = None
 
     def reset(self):
+        self.rom_top = self.rom_bot + len(self.rom)
+        self.ram_top = self.ram_bot + len(self.ram)
         self.cpu.trace_list = self.trace_list
         self.cpu.reset()
 
@@ -121,7 +123,7 @@ class SoC(object):
 
             # Remember if we load instructions on the reset address.
             if (flags & SH_FLAGS.SHF_EXECINSTR):
-                if m5cpu.ADDR_RESET >= addr and m5cpu.ADDR_RESET < (addr + size):
+                if self.cpu.reset_addr >= addr and self.cpu.reset_addr < (addr + size):
                     executable_stuff_at_reset_addr = True
 
             # Find out which area contains this section.

@@ -129,8 +129,8 @@ class CPUTraceMismatch(CPUError):
 class CPU(object):
 
     def __init__(self, load, store, delta, log_asm):
-        self.PC = ADDR_RESET
-        self.PC_next = ADDR_RESET
+        self.reset_addr = ADDR_RESET
+        self.trap_addr = ADDR_TRAP # FIXME should use CSR
         self.trace_start_addr = None
         self.trace_list = None
         self._trace_index = 0
@@ -151,7 +151,9 @@ class CPU(object):
 
 
     def reset(self):
-        self.PC = ADDR_RESET
+        self.PC_next = self.reset_addr
+        self.PC = self.reset_addr
+        CSR[CSR_MTVEC] = self.trap_addr     # FIXME will HW do this? hardwired?
         self._idle = False
         self._trace_index = 0
         self._trace_enable = False

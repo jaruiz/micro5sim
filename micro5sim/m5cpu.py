@@ -69,6 +69,13 @@ ENV_OPS = {
     0b111:  ("csrrci", "_op_csrrci",),
 }
 
+CUSTOM_OPS = {
+    0b010:  ("custom-putc", "_op_custom_putc",),
+    0b011:  ("custom-idle", "_op_custom_idle",),
+}
+
+
+
 # Register name by index. Used in the disassembly generation.
 RN = [
     "zero", "ra",   "sp",   "gp",   "tp",   "t0",   "t1",   "t2",
@@ -140,10 +147,14 @@ class CPU(object):
         self._func3 = 0
         self._func7 = 0
         self._asm = "???"
+        self._idle = False
 
 
     def reset(self):
         self.PC = ADDR_RESET
+        self._idle = False
+        self._trace_index = 0
+        self._trace_enable = False
 
 
     def run(self, num=None):
@@ -154,6 +165,9 @@ class CPU(object):
             self._decode_execute(instruction)
             self._log_asm(self._build_asm(instruction))
             self.PC = self.PC_next
+            if self._idle:
+                #print "IDLE instruction executed, program terminated."
+                break
 
 
     def _fail_trace_check(self, tpoint, msg):
@@ -379,7 +393,15 @@ class CPU(object):
         rs1 = self._rbank[self._rs1]
         (mnemo, function) = ENV_OPS[self._func3]
         res = getattr(self, function)(rs1, mnemo)
-        
+
+
+    def _op_custom(self):
+        if not self._func3 in CUSTOM_OPS:
+            self._unimplemented_func3()
+
+        rs1 = self._rbank[self._rs1]
+        (mnemo, function) = CUSTOM_OPS[self._func3]
+        res = getattr(self, function)(rs1, mnemo)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -523,12 +545,17 @@ class CPU(object):
         self._asm = "fence"
 
 
-    def _op_custom(self):
-        # Only one custom instruction implemented: putc(r10)
-        # FIXME check encoding as 0x0005200B.
+    def _op_custom_putc(self, rs1, mnemo):
+        """Simulation-only instruction putc(rs1)"""
         sys.stdout.write("%c" % self._rbank[10])
         sys.stdout.flush()
-        self._asm = "custom-putc a0"
+        self._asm = "%s %s" % (mnemo, RN[self._rs1])
+
+
+    def _op_custom_idle(self, rs1, mnemo):
+        """Simulation-only instruction: idle (stop program)."""
+        self._idle = True
+        self._asm = "%s" % (mnemo)
 
 
     def _op_jal(self):

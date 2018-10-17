@@ -288,7 +288,7 @@ class CPU(object):
                     self._check_trace(self.PC, rd, value)
             self._rbank[rd] = value
             # Build a delta string to be displayed along the asm trace...
-            self._delta = "%08x: %s=%08x" % (self.PC, RN[rd], value)
+            self._delta = "%s=%08x" % (RN[rd], value)
             # ...and log the delta to file if the log is enabled.
             self._log_delta(self.PC, rd, value)
 
@@ -604,6 +604,7 @@ class CPU(object):
         word = self._load(address)
         index = 8 * (address & 0x3)
         _byte = (word >> index) & 0xff
+        self._delta = "[%08x].B -> %02x" % (address, _byte)
         return _byte
 
     def _op_lb(self, a, b):
@@ -612,6 +613,7 @@ class CPU(object):
         index = 8 * (address & 0x3)
         _byte = (word >> index) & 0xff
         data = (_byte | 0xffffff00) if (_byte & 0x80) else _byte
+        self._delta = "[%08x].B -> %02x" % (address, _byte)
         return data
 
     def _op_lhu(self, a, b):
@@ -619,6 +621,7 @@ class CPU(object):
         word = self._load(address)
         index = 8 * (address & 0b10)
         halfword = (word >> index) & 0xffff
+        self._delta = "[%08x].H -> %04x" % (address, halfword)
         return halfword
 
 
@@ -629,27 +632,32 @@ class CPU(object):
         halfword = (word >> index) & 0xffff
         #print "%08x  %08x %d %08x" % (self.PC, word, index, address)
         data = halfword | 0xffff0000 if (halfword & 0x8000) else halfword
+        self._delta = "[%08x].H -> %04x" % (address, halfword)
         return data
 
 
     def _op_lw(self, a, b):
         address = (a + b) & 0xffffffff
         data = self._load(address)
+        self._delta = "[%08x].W -> %08x" % (address, data)
         return data
 
 
     def _op_sw(self, rs2, rs1, imm):
         address = (rs1 + imm) & 0xffffffff
+        self._delta = "[%08x].W <- %08x" % (address, rs2)
         self._store(address, rs2, 4)
 
 
     def _op_sh(self, rs2, rs1, imm):
         address = (rs1 + imm) & 0xffffffff
+        self._delta = "[%08x].H <- %04x" % (address, rs2)
         self._store(address, rs2, 2)
 
 
     def _op_sb(self, rs2, rs1, imm):
         address = (rs1 + imm) & 0xffffffff
+        self._delta = "[%08x].B <- %02x" % (address, rs2)
         self._store(address, rs2, 1)
 
 

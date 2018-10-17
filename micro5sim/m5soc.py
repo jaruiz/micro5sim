@@ -196,13 +196,16 @@ class SoC(object):
 
 
     def _log_delta(self, pc, index, value):
+        delta = "%08x: r%02d=%08x" % (pc, index, value)
         if self.delta_log_file:
-            print >> self.delta_log_file, "%08x: r%02d=%08x" % (pc, index, value)
+            print >> self.delta_log_file, delta
+        return delta
 
 
-    def _log_asm(self, asm):
+    def _log_asm(self, asm, delta):
         if self.asm_log_file:
-            print >> self.asm_log_file, asm
+            delta = "; " + delta if delta else ""
+            print >> self.asm_log_file, "%-50s %s" % (asm, delta)
 
 
     def _print_section_info(self, section, area):

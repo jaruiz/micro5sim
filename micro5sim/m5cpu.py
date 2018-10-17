@@ -109,6 +109,16 @@ CSR = {
     CSR_MIP: 0
 }
 
+CSR_NAME = {
+    CSR_MSTATUS:        "MSTATUS",
+    CSR_MISA:           "MISA",
+    CSR_MTVEC:          "MTVEC",
+    CSR_MSCRATCH:       "MSCRATCH",
+    CSR_MEPC:           "MEPC",
+    CSR_MCAUSE:         "MCAUSE",
+    CSR_MTVAL:          "MTVAL",
+    CSR_MIP:            "MIP",
+}
 
 
 class CPUError(Exception):
@@ -133,6 +143,7 @@ class CPU(object):
         self.trap_addr = ADDR_TRAP # FIXME should use CSR
         self.trace_start_addr = None
         self.trace_list = None
+        self.quit_if_idle = False
         self._trace_index = 0
         self._trace_enable = False
         self._load = load
@@ -147,6 +158,7 @@ class CPU(object):
         self._func3 = 0
         self._func7 = 0
         self._asm = "???"
+        self._delta = ""
         self._idle = False
 
 
@@ -165,10 +177,11 @@ class CPU(object):
             if num: num -= 1
             instruction = self._fetch()
             self._decode_execute(instruction)
-            self._log_asm(self._build_asm(instruction))
+            self._log_asm(self._build_asm(instruction), self._delta)
+            self._delta = ""
             self.PC = self.PC_next
-            if self._idle:
-                #print "IDLE instruction executed, program terminated."
+            if self._idle and self.quit_if_idle:
+                print "IDLE instruction executed, program terminated."
                 break
 
 
@@ -274,6 +287,9 @@ class CPU(object):
                 if value != self._rbank[rd]:
                     self._check_trace(self.PC, rd, value)
             self._rbank[rd] = value
+            # Build a delta string to be displayed along the asm trace...
+            self._delta = "%08x: %s=%08x" % (self.PC, RN[rd], value)
+            # ...and log the delta to file if the log is enabled.
             self._log_delta(self.PC, rd, value)
 
 
@@ -438,7 +454,8 @@ class CPU(object):
             csr = self._read_csr(self._imm)
             self._writeback(self._rd, csr)
         self._write_csr(self._imm, rs1)
-        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, %s" % (mnemo, RN[self._rd], csr_name, RN[self._rs1])
 
 
     def _op_csrrs(self, rs1, mnemo):
@@ -447,7 +464,8 @@ class CPU(object):
             self._writeback(self._rd, csr)
         if self._rs1:
             self._write_csr(self._imm, csr | rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, %s" % (mnemo, RN[self._rd], csr_name, RN[self._rs1])
 
 
     def _op_csrrc(self, rs1, mnemo):
@@ -456,7 +474,8 @@ class CPU(object):
             self._writeback(self._rd, csr)
         if self._rs1:
             self._write_csr(self._imm, csr & ~rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, %s" % (mnemo, RN[self._rd], self._imm, RN[self._rs1])
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, %s" % (mnemo, RN[self._rd], csr_name, RN[self._rs1])
 
 
     def _op_csrrwi(self, rs1, mnemo):
@@ -465,7 +484,8 @@ class CPU(object):
             self._writeback(self._rd, csr)
 
         self._write_csr(self._imm, self._rs1)
-        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, 0x%x" % (mnemo, RN[self._rd], csr_name, self._rs1)
 
 
     def _op_csrrsi(self, rs1, mnemo):
@@ -475,7 +495,8 @@ class CPU(object):
         
         if self._rs1:
             self._write_csr(self._imm, csr | self._rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, 0x%x" % (mnemo, RN[self._rd], csr_name, self._rs1)
 
 
     def _op_csrrci(self, rs1, mnemo):
@@ -484,7 +505,8 @@ class CPU(object):
             self._writeback(self._rd, csr)
         if self._rs1:
             self._write_csr(self._imm, csr & ~self._rs1) # FIXME writable mask
-        self._asm = "%s %s, csr{%d}, 0x%x" % (mnemo, RN[self._rd], self._imm, self._rs1)
+        csr_name = ("csr{%d}" % self._imm) if not self._imm in CSR_NAME else CSR_NAME[self._imm]
+        self._asm = "%s %s, %s, 0x%x" % (mnemo, RN[self._rd], csr_name, self._rs1)
 
 
 

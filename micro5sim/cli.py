@@ -112,6 +112,9 @@ def _parse_cmdline():
     parser.add_argument('--rom-writeable', action="store_true",
         help="make ROM area writeable (effectively a second RAM area). Defaults to False",
         default=False)
+    parser.add_argument('--quit-if-idle', action="store_true",
+        help="terminate simulation if instruction 'custom-idle' is executed. Defaults to False",
+        default=False)
     parser.add_argument('--ovpsim-trace', metavar='FILE',
         help="check against a riscvOVPsim trace (trace+traceregs)",
         default=None)
@@ -154,6 +157,7 @@ def main():
         soc.ram_bot = opts.ram_addr
         soc.cpu.reset_addr = opts.reset_addr
         soc.cpu.trap_addr = opts.trap_addr
+        soc.cpu.quit_if_idle = opts.quit_if_idle
 
         try:
             if opts.sig_ref:

@@ -1,0 +1,5 @@
+*.pyc
+*/work/*
+riscv-tests/*.txt
+riscv-tests/*.log
+*.egg-info

@@ -236,6 +236,7 @@ class CPU(object):
         Entry point for execution of all instructions.
         Returns the number of clock cycles elapsed.
         """
+        self._instruction = instruction
         self._opcode = instruction & 0x7f
         if not self._opcode in OPCODES:
             self._unimplemented_opcode()
@@ -288,6 +289,12 @@ class CPU(object):
 
     def _unimplemented_opcode(self):
         msg = "[0x{0:08x}] UNIMPLEMENTED OPCODE {1:07b}".format(self.PC, self._opcode)
+        raise CPUUnimplemented(msg)
+
+
+    def _unimplemented_encoding(self):
+        msg = "[0x{0:08x}] UNIMPLEMENTED ENCODING {1:08x} WITH OPCODE {2:07b}" \
+            .format(self.PC, self._instruction, self._opcode)
         raise CPUUnimplemented(msg)
 
 
@@ -545,7 +552,7 @@ class CPU(object):
         elif self._imm == 0b000000000001:
             return self._op_ebreak(rs1)
         elif self._func7 == 0b0001000:
-            return self._op_eret(rs1) # FIXME to be removed
+            return self._op_wfi(rs1)
         elif self._func7 == 0b0011000:
             return self._op_mret(rs1)
         else:
@@ -578,10 +585,13 @@ class CPU(object):
         self.PC = CSR[CSR_MTVEC]
 
 
-    def _op_eret(self, rs1):
-        # FIXME check rs1, rd are zero
-        self.PC_next = self._read_csr(CSR_MEPC)
-        self._asm = "eret %s" % (RN[self._rs1])
+    def _op_wfi(self, rs1):
+        if self._rs1 == self._rd == 0 and self._imm == 0x105:
+            # Implement as NOP for the time being.
+            self._asm = "wfi %s" % (RN[self._rs1])
+        else:
+            self._unimplemented_encoding()
+
 
     def _op_mret(self, rs1):
         # FIXME check rs1, rd are zero, rs2==0x2

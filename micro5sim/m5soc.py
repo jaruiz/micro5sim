@@ -1,4 +1,13 @@
 #!/usr/bin/env python
+"""
+
+
+    TODO:
+
+    # Peripheral block addresses need to be params & members.
+    # Maybe put all memory map info in a config file?
+"""
+
 
 import argparse
 import sys
@@ -7,12 +16,16 @@ from elftools.elf.elffile import ELFFile
 from elftools.elf.constants import SH_FLAGS
 
 import m5cpu
+import m5devs
 
 
 DEFAULT_ROM_ADDR =  0x80000000
 DEFAULT_ROM_WORDS = 1024*1024
 DEFAULT_RAM_ADDR =  0xc0000000
 DEFAULT_RAM_WORDS = 512*1024
+
+DEFAULT_UART_ADDR = 0x10000000
+DEFAULT_TIMER_ADDR =0x10000100
 
 
 SYMBOL_INTERCEPT_FETCH_CALLBACKS = {
@@ -68,16 +81,23 @@ class SoC(object):
         self.rom_writeable = False
         self.trace_list = None
         self.signature_reference = None
+        self.cycles_from_reset = 0
+        self._build_device_tables()
 
     def reset(self):
         self.rom_top = self.rom_bot + len(self.rom)
         self.ram_top = self.ram_bot + len(self.ram)
         self.cpu.trace_list = self.trace_list
+        self.cycles_from_reset = 0
         self.cpu.reset()
 
 
     def run(self, num=None):
-        self.cpu.run(num)
+        while num == None or num > 0:
+            if num: num -= 1
+            cycles = self.cpu.run()
+            self.cycles_from_reset = self.cycles_from_reset + cycles
+            self._clock_peripherals(cycles)
 
 
     def read_elf(self, filename):
@@ -98,7 +118,7 @@ class SoC(object):
         # Display some info in a format resembling riscvOVPsim's.
         print "Read object file '%s'" % filename
         print "Sections loaded:"
-        print "  Area          Section           Address     MemSize"
+        print "  %-12s  %-24s  %-10s  %-10s" % ("Area","Section","Address","MemSize")
 
 
         executable_stuff_at_reset_addr = False
@@ -156,6 +176,35 @@ class SoC(object):
         return executable_stuff_at_reset_addr
 
 
+    def _build_device_tables(self):
+        """Build device tables/dictionaries."""
+        # FIXME this info should come from a config file.
+        self.dev_by_addr = {}
+        self.devices = []
+
+        uart = m5devs.UART(ofile=sys.stdout)
+        self.dev_by_addr[DEFAULT_UART_ADDR] = uart
+        self.devices.append((uart, 0))
+
+        timer = m5devs.Timer()
+        self.dev_by_addr[DEFAULT_TIMER_ADDR] = timer
+        self.devices.append((timer, 1))
+
+
+    def _clock_peripherals(self, cycles):
+
+        # Let's see which interrupt lines were raised on the last exec run:
+        irq_list = []
+        for (device, irq_no) in self.devices:
+            if device.clock(cycles):
+                irq_list.append(irq_no)
+        # If there's any line raised, let the CPU know.
+        if irq_list: 
+            self.cpu.irq(irq_list)
+    
+
+
+
     def _load(self, addr, space='d'):
         if space == 'c' and  addr in SYMBOL_INTERCEPT_FETCH:
             getattr(self, SYMBOL_INTERCEPT_FETCH[addr])()
@@ -165,8 +214,10 @@ class SoC(object):
             return self.rom[(addr - self.rom_bot)/4]
         elif self.ram_bot <= addr < self.ram_top:
             return self.ram[(addr - self.ram_bot)/4]
+        elif addr in self.dev_by_addr:
+            return self.dev_by_addr[addr].read(addr)
         else:
-            return 0x42000000
+            return 0x00
 
 
     def _store(self, addr, value, lanes=4):
@@ -189,10 +240,9 @@ class SoC(object):
             word = self.ram[(addr - self.ram_bot)/4]
             word = (word & ~mask) | value
             self.ram[(addr - self.ram_bot)/4] = word
-        elif addr == 0x10000000: # FIXME parameter
-            # FIXME to file
-            sys.stdout.write("%c" % (value & 0xff))
-            sys.stdout.flush()
+
+        elif addr in self.dev_by_addr:
+            self.dev_by_addr[addr].write(addr, value, lanes)
 
 
     def _log_delta(self, pc, index, value):
@@ -209,12 +259,17 @@ class SoC(object):
 
 
     def _print_section_info(self, section, area):
-        print "  %-12s  %-16s  0x%08x  0x%08x" % (area, section.name, section.header['sh_addr'], section.header['sh_size'])    
+        print "  %-12s  %-24s  0x%08x  0x%08x" % (area, section.name, section.header['sh_addr'], section.header['sh_size'])    
 
 
     def _load_section_data(self, section, offset, mem):
-        data = bytearray()
-        data.extend(section.data())
+        if section['sh_type'] == 'SHT_NOBITS':
+            # Section is .bss or similar. Fill with zeros. 
+            data = [0] * section.data_size
+        else:
+            # Regular section with actual loadable code/data.
+            data = bytearray()
+            data.extend(section.data())
         for j in range(len(data)/4):
             i = j * 4
             word = (data[i+0]<<0) | (data[i+1]<<8) | (data[i+2]<<16) | (data[i+3]<<24)

@@ -9,18 +9,20 @@ ADDR_TRAP =     0x80000004
 
 
 OPCODES = {
-    0b1101111: ("_format_j", "_op_jal"),
-    0b1100111: ("_format_i", "_op_jalr"),
-    0b0110111: ("_format_u", "_op_lui"),
-    0b0010011: ("_format_i", "_op_imm"),
-    0b0110011: ("_format_r", "_op_reg"),
-    0b0000011: ("_format_i", "_op_load"),
-    0b0100011: ("_format_s", "_op_store"),
-    0b1110011: ("_format_i", "_op_env"),
-    0b1100011: ("_format_b", "_op_branch"),
-    0b0010111: ("_format_u", "_op_auipc"),
-    0b0001111: ("_format_i", "_op_fence"),
-    0b0001011: ("_format_i", "_op_custom"),
+    # opcode : (decode-function, execute-function, base-clock-cycles)
+    # FIXME clock cycle counts are fake
+    0b1101111: ("_format_j", "_op_jal",     2),
+    0b1100111: ("_format_i", "_op_jalr",    2),
+    0b0110111: ("_format_u", "_op_lui",     1),
+    0b0010011: ("_format_i", "_op_imm",     1),
+    0b0110011: ("_format_r", "_op_reg",     1),
+    0b0000011: ("_format_i", "_op_load",    2),
+    0b0100011: ("_format_s", "_op_store",   2),
+    0b1110011: ("_format_i", "_op_env",     1),
+    0b1100011: ("_format_b", "_op_branch",  2),
+    0b0010111: ("_format_u", "_op_auipc",   1),
+    0b0001111: ("_format_i", "_op_fence",   1),
+    0b0001011: ("_format_i", "_op_custom",  1),
 }
 
 ALU_OPS = {
@@ -135,6 +137,11 @@ class CPUTraceMismatch(CPUError):
     def __init__(self, msg):
         super(CPUError, self).__init__(msg)
 
+class CPUIdle(CPUError):
+    """Executed custom-idle instruction and quit-on-idle is enabled."""
+    def __init__(self, msg):
+        super(CPUError, self).__init__(msg)
+
 
 class CPU(object):
 
@@ -166,23 +173,34 @@ class CPU(object):
         self.PC_next = self.reset_addr
         self.PC = self.reset_addr
         CSR[CSR_MTVEC] = self.trap_addr     # FIXME will HW do this? hardwired?
+        CSR[CSR_MIP] = 0                    # FIXME will HW do this?
         self._idle = False
         self._trace_index = 0
         self._trace_enable = False
 
 
     def run(self, num=None):
+        """Run a single instruction at PC. Return elapsed cycle count."""
+        instruction = self._fetch()
+        cycles = self._decode_execute(instruction)
+        self._log_asm(self._build_asm(instruction), self._delta)
+        self.PC = self.PC_next
+        if self._idle and self.quit_if_idle:
+            raise CPUIdle("IDLE instruction executed")
 
-        while num == None or num > 0:
-            if num: num -= 1
-            instruction = self._fetch()
-            self._decode_execute(instruction)
-            self._log_asm(self._build_asm(instruction), self._delta)
-            self._delta = ""
-            self.PC = self.PC_next
-            if self._idle and self.quit_if_idle:
-                print "IDLE instruction executed, program terminated."
-                break
+        return cycles
+
+
+    def irq(self, irq_list):
+        """Raise one or more interrupt lines."""
+        for i in irq_list:
+            CSR[CSR_MIP] = CSR[CSR_MIP] | (1 << i)
+
+        # FIXME interrupt mask, interrupt enable regs missing
+        # FIXME quick hack to check behaviour of Zephyr driver
+        if CSR[CSR_MIP]:
+            self._log_asm("INTERRUPT", "")
+            self._do_interrupt(0x10) # FIXME parameter
 
 
     def _fail_trace_check(self, tpoint, msg):
@@ -214,14 +232,25 @@ class CPU(object):
 
 
     def _decode_execute(self, instruction):
+        """Decode 32-bit instruction and execute it.
+        Entry point for execution of all instructions.
+        Returns the number of clock cycles elapsed.
+        """
         self._opcode = instruction & 0x7f
         if not self._opcode in OPCODES:
             self._unimplemented_opcode()
+        self._delta = ""
 
         # Invoke decode function, leaving the fields in 'self'...
         getattr(self, OPCODES[self._opcode][0])(instruction)
         # ...and then invoke the execute function.
         getattr(self, OPCODES[self._opcode][1])()
+
+        # Compute final cycle count for instruction.
+        # FIXME crude hack to get ball rolling
+        cycles = OPCODES[self._opcode][2]
+
+        return cycles
 
 
     def _get_bitfield(self, word, pieces, sext=None):
@@ -288,7 +317,7 @@ class CPU(object):
                     self._check_trace(self.PC, rd, value)
             self._rbank[rd] = value
             # Build a delta string to be displayed along the asm trace...
-            self._delta = "%s=%08x" % (RN[rd], value)
+            self._delta = self._delta + "%s=%08x" % (RN[rd], value)
             # ...and log the delta to file if the log is enabled.
             self._log_delta(self.PC, rd, value)
 
@@ -543,6 +572,12 @@ class CPU(object):
         self.PC_next = CSR[CSR_MTVEC]
 
 
+    def _do_interrupt(self, cause):
+        self._write_csr(CSR_MEPC, self.PC)
+        self._write_csr(CSR_MCAUSE, cause)
+        self.PC = CSR[CSR_MTVEC]
+
+
     def _op_eret(self, rs1):
         # FIXME check rs1, rd are zero
         self.PC_next = self._read_csr(CSR_MEPC)
@@ -604,7 +639,7 @@ class CPU(object):
         word = self._load(address)
         index = 8 * (address & 0x3)
         _byte = (word >> index) & 0xff
-        self._delta = "[%08x].B -> %02x" % (address, _byte)
+        self._delta = "[%08x].B -> " % (address)
         return _byte
 
     def _op_lb(self, a, b):
@@ -613,7 +648,7 @@ class CPU(object):
         index = 8 * (address & 0x3)
         _byte = (word >> index) & 0xff
         data = (_byte | 0xffffff00) if (_byte & 0x80) else _byte
-        self._delta = "[%08x].B -> %02x" % (address, _byte)
+        self._delta = "[%08x].B -> " % (address)
         return data
 
     def _op_lhu(self, a, b):
@@ -621,7 +656,7 @@ class CPU(object):
         word = self._load(address)
         index = 8 * (address & 0b10)
         halfword = (word >> index) & 0xffff
-        self._delta = "[%08x].H -> %04x" % (address, halfword)
+        self._delta = "[%08x].H -> " % (address)
         return halfword
 
 
@@ -632,14 +667,14 @@ class CPU(object):
         halfword = (word >> index) & 0xffff
         #print "%08x  %08x %d %08x" % (self.PC, word, index, address)
         data = halfword | 0xffff0000 if (halfword & 0x8000) else halfword
-        self._delta = "[%08x].H -> %04x" % (address, halfword)
+        self._delta = "[%08x].H -> " % (address)
         return data
 
 
     def _op_lw(self, a, b):
         address = (a + b) & 0xffffffff
         data = self._load(address)
-        self._delta = "[%08x].W -> %08x" % (address, data)
+        self._delta = "[%08x].W -> " % (address)
         return data
 
 

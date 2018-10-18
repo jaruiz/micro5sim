@@ -187,7 +187,7 @@ def main():
             _error(case_name, str(e), EX_TRACE_MISMATCH)
         except m5soc.SoCQuitSigMismatch as e:
             _error(case_name, str(e), EX_SIG_MISMATCH)
-        except m5soc.SoCQuit as e:
+        except (m5soc.SoCQuit, m5cpu.CPUIdle) as e:
             _quit(case_name, str(e), posix.EX_OK)
 
     except KeyboardInterrupt:

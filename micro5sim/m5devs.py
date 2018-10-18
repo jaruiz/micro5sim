@@ -104,4 +104,4 @@ class Timer(Peripheral):
 
 
     def _rearm(self):
-        self.downcount = 4000000
+        self.downcount = 10000

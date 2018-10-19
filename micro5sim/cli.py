@@ -106,6 +106,9 @@ def _parse_cmdline():
     parser.add_argument('--trap-addr', metavar="ADDR",
         help="trap address. Defaults to 0x%08x" % (m5cpu.ADDR_TRAP),
         type=lambda x: int(x,0), default=m5cpu.ADDR_TRAP)
+    parser.add_argument('--timer-period', metavar="NUM",
+        help="hardwired period of timer in clock cycles. Defaults to %d" % (m5soc.DEFAULT_TIMER_PERIOD),
+        type=lambda x: int(x,0), default=m5soc.DEFAULT_TIMER_PERIOD)
     parser.add_argument('--num-inst', metavar="NUM",
         help="maximum number of instructions to execute. Defaults to unlimited",
         type=lambda x: int(x,0), default=None)
@@ -161,6 +164,7 @@ def main():
         soc.trace_start_addr = opts.trace_start
         soc.rom_bot = opts.rom_addr
         soc.ram_bot = opts.ram_addr
+        soc.timer_period = opts.timer_period
         soc.cpu.reset_addr = opts.reset_addr
         soc.cpu.trap_addr = opts.trap_addr
         soc.cpu.quit_if_idle = opts.quit_if_idle

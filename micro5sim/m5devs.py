@@ -75,8 +75,9 @@ class UART(Peripheral):
 
 class Timer(Peripheral):
 
-    def __init__(self):
+    def __init__(self, period):
         self.cycles = 0
+        self.period = period
         self._rearm()
 
 
@@ -104,4 +105,4 @@ class Timer(Peripheral):
 
 
     def _rearm(self):
-        self.downcount = 10000
+        self.downcount = self.period

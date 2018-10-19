@@ -19,13 +19,14 @@ import m5cpu
 import m5devs
 
 
-DEFAULT_ROM_ADDR =  0x80000000
-DEFAULT_ROM_WORDS = 1024*1024
-DEFAULT_RAM_ADDR =  0xc0000000
-DEFAULT_RAM_WORDS = 512*1024
+DEFAULT_ROM_ADDR =          0x80000000
+DEFAULT_ROM_WORDS =         1024*1024
+DEFAULT_RAM_ADDR =          0xc0000000
+DEFAULT_RAM_WORDS =         512*1024
 
-DEFAULT_UART_ADDR = 0x10000000
-DEFAULT_TIMER_ADDR =0x10000100
+DEFAULT_UART_ADDR =         0x10000000
+DEFAULT_TIMER_ADDR =        0x10000100
+DEFAULT_TIMER_PERIOD =      10000
 
 
 SYMBOL_INTERCEPT_FETCH_CALLBACKS = {
@@ -75,6 +76,7 @@ class SoC(object):
         self.rom_top = DEFAULT_ROM_ADDR + DEFAULT_ROM_WORDS
         self.ram_bot = DEFAULT_RAM_ADDR
         self.ram_top = DEFAULT_RAM_ADDR + DEFAULT_RAM_WORDS
+        self.timer_period = DEFAULT_TIMER_PERIOD
         self.cpu = m5cpu.CPU(self._load, self._store, self._log_delta, self._log_asm)
         self.delta_log_file = None
         self.asm_log_file = None
@@ -83,6 +85,7 @@ class SoC(object):
         self.signature_reference = None
         self.cycles_from_reset = 0
         self._build_device_tables()
+
 
     def reset(self):
         self.rom_top = self.rom_bot + len(self.rom)
@@ -186,7 +189,7 @@ class SoC(object):
         self.dev_by_addr[DEFAULT_UART_ADDR] = uart
         self.devices.append((uart, 0))
 
-        timer = m5devs.Timer()
+        timer = m5devs.Timer(self.timer_period)
         self.dev_by_addr[DEFAULT_TIMER_ADDR] = timer
         self.devices.append((timer, 1))
 

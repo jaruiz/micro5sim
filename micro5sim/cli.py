@@ -112,6 +112,12 @@ def _parse_cmdline():
     parser.add_argument('--rom-writeable', action="store_true",
         help="make ROM area writeable (effectively a second RAM area). Defaults to False",
         default=False)
+    parser.add_argument('--reg-trace', type=str, metavar='FILE',
+        help="output a log of register changes",
+        default=None)
+    parser.add_argument('--asm-trace', type=str, metavar='FILE',
+        help="output a trace of executed instructions (disassembly plus register changes)",
+        default=None)
     parser.add_argument('--quit-if-idle', action="store_true",
         help="terminate simulation if instruction 'custom-idle' is executed. Defaults to False",
         default=False)
@@ -175,8 +181,10 @@ def main():
         except m5soc.SoCELFError as e:
             _error(case_name, str(e), posix.EX_IOERR)
 
-        soc.delta_log_file = open("log.txt", "w")
-        soc.asm_log_file = open("trace.txt", "w")
+        if opts.reg_trace:
+            soc.delta_log_file = open(opts.reg_trace, "w")
+        if opts.asm_trace:
+            soc.asm_log_file = open(opts.asm_trace, "w")
 
         try:
             soc.reset()

@@ -218,7 +218,7 @@ ERROR (zephyr):  Terminated by user
 
 As you can see, we just used a single block of memory called `ROM` to contain all the executable and its data. This is certainly not realistic.
 
-Eventually the simulator will be able to load a bootable binary (as opposed to an elf file) and I will refine the memory map to reflect the actual hardware. But for the time being this is enough to get the ball rolling.
+Eventually the simulator will be able to load a rom-able binary (as opposed to an elf file) and I will refine the memory map to reflect the actual hardware. But for the time being this is enough to get the ball rolling.
 
 So far, only the following code samples have been tried at all:
 

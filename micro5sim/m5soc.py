@@ -51,6 +51,11 @@ class SoCELFError(SoCError):
     def __init__(self, msg):
         super(SoCError, self).__init__(msg)
 
+class SoCBinError(SoCError):
+    """Something is wrong in a bin file other than an IOError."""
+    def __init__(self, msg):
+        super(SoCError, self).__init__(msg)
+
 class SoCQuit(SoCError):
     """Program hit any of the normal or abnormal termination conditions."""
     def __init__(self, msg):
@@ -106,6 +111,38 @@ class SoC(object):
             self._clock_peripherals(cycles)
 
 
+    def read_bin(self, filename, rom=True):
+        """ Read a plain binary file (little endian) at the start of the
+            ROM or RAM block, as selected by 'rom'.
+            Will raise SoCBinError if the data does not fit the selected
+            memory area.
+            Returns True if the length of the file is not zero.
+        """
+
+        fi = open(filename, "rb")
+        buf = bytearray(fi.read())
+        fi.close()
+
+        numwords = len(buf)/4
+        if (len(buf) % 4) != 0: numwords += 1
+
+        if rom and numwords > len(self.rom):
+            raise SoCBinError("binary file '%s' does not fit ROM area")
+        if not rom and numwords > len(self.ram):
+            raise SoCBinError("binary file '%s' does not fit RAM area")
+
+
+        for j in range(len(buf)/4):
+            i = j * 4
+            word = (buf[i+0]<<0) | (buf[i+1]<<8) | (buf[i+2]<<16) | (buf[i+3]<<24)
+            if rom:
+                self.rom[j] = word
+            else:
+                self.ram[j] = word
+
+        return numwords != 0
+
+
     def read_elf(self, filename):
         """ Read all sections into the memory area they're contained in.
             Ignore any section that is fully outside all memory areas but 
@@ -134,7 +171,7 @@ class SoC(object):
             flags = section.header['sh_flags']
 
             # There's a number of symbol values we want to know. Watch out
-            # for tymbol tables and extract them.
+            # for symbol tables and extract them.
             if section['sh_type'] == 'SHT_SYMTAB':
                 for symbol in section.iter_symbols():
                     if symbol.name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
@@ -187,6 +224,21 @@ class SoC(object):
         fi.close()
 
         return executable_stuff_at_reset_addr
+
+
+    def intercept(self, addr, symbol_name="write_to_host"):
+        """Override value of symbol _write_to_host."""
+        if symbol_name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
+            callback = SYMBOL_INTERCEPT_FETCH_CALLBACKS[symbol_name]
+            SYMBOL_INTERCEPT_FETCH[addr] = callback
+
+
+    def signature_area(self, addr, begin=True):
+        """Override value of signature begin/end symbols."""
+        if begin:
+            SYMBOL_VALUE['begin_signature'] = addr
+        else:
+            SYMBOL_VALUE['end_signature'] = addr
 
 
     def _build_device_tables(self):

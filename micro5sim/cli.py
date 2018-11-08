@@ -86,8 +86,14 @@ def _parse_cmdline():
         description='Simulator for micro5 risc-v core',
         epilog="See README.md for a longer description.")
 
-    parser.add_argument('elf', metavar="ELF-FILE", type=str,
-        help="Executable (elf) file")
+    parser.add_argument('code', metavar="ELF-OR-BIN-FILE", type=str,
+        help="Executable (elf/plain binary, see --binary) file")
+    parser.add_argument('data', metavar="BIN-FILE", type=str, 
+        nargs='?', default=None,
+        help="RAM initialization file (plain binary)")
+    parser.add_argument('--binary', action="store_true",
+        help="take two plain binary ROM/RAM files instead of a single elf file. Defaults to False",
+        default=False)
     parser.add_argument('--rom-addr', metavar="ADDR",
         help="base address of ROM area. Defaults to 0x%08x" % (m5soc.DEFAULT_ROM_ADDR),
         type=lambda x: int(x,0), default=m5soc.DEFAULT_ROM_ADDR)
@@ -133,6 +139,18 @@ def _parse_cmdline():
     parser.add_argument('--sig-ref', metavar='FILE',
         help="check signature against reference",
         default=None)
+    parser.add_argument('--write-to-host', metavar="ADDR",
+        help="address where write-to-host operation should be intercepted. " + \
+             "Overrides the value of the symbol read from the elf file, if any." ,
+        type=lambda x: int(x,0), default=None)
+    parser.add_argument('--signature-begin', metavar="ADDR",
+        help="start address of signature area. " + \
+             "Overrides the value of the symbol read from the elf file, if any." ,
+        type=lambda x: int(x,0), default=None)
+    parser.add_argument('--signature-end', metavar="ADDR",
+        help="end address of signature area. " + \
+             "Overrides the value of the symbol read from the elf file, if any." ,
+        type=lambda x: int(x,0), default=None)
 
     args = parser.parse_args()
 
@@ -144,7 +162,7 @@ def main():
     try:
         opts = _parse_cmdline()
 
-        case_name = os.path.basename(opts.elf).split(".")[0]
+        case_name = os.path.basename(opts.code).split(".")[0]
 
         try:
             if opts.ovpsim_trace:
@@ -178,13 +196,36 @@ def main():
         except IOError as e:
             _error(case_name, "Trouble reading signature reference file: " + str(e), posix.EX_IOERR)
 
-        try:
-            if not soc.read_elf(opts.elf):
-                _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
-        except IOError as e:
-            _error(case_name, "Trouble reading elf file: " + str(e), posix.EX_IOERR)
-        except m5soc.SoCELFError as e:
-            _error(case_name, str(e), posix.EX_IOERR)
+        if opts.binary:
+            # Read plain binary data file onto ROM and optionally another 
+            # plain binary data file onto RAM.
+            try:
+                if not soc.read_bin(opts.code, rom=True):
+                    _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
+                if opts.data:
+                    soc.read_bin(opts.data, rom=False)
+            except IOError as e:
+                _error(case_name, "Trouble reading binary file: " + str(e), posix.EX_IOERR)
+            except Exception as e:
+                _error(case_name, "Error reading binary file -- " + str(e), posix.EX_IOERR)
+        else:
+            # Read a single elf file section by section.
+            try:
+                if not soc.read_elf(opts.code):
+                    _error(case_name, "No executable instructions at reset address", EX_NOEXEC_AT_RESET)
+            except IOError as e:
+                _error(case_name, "Trouble reading elf file: " + str(e), posix.EX_IOERR)
+            except m5soc.SoCELFError as e:
+                _error(case_name, str(e), posix.EX_IOERR)
+            except Exception as e:
+                _error(case_name, "Error reading elf file -- " + str(e), posix.EX_IOERR)
+
+        if opts.write_to_host:
+            soc.intercept(opts.write_to_host)
+        if opts.signature_begin:
+            soc.signature_area(opts.signature_begin, begin=True)
+        if opts.signature_end:
+            soc.signature_area(opts.signature_end, begin=False)
 
         if opts.reg_trace:
             soc.delta_log_file = open(opts.reg_trace, "w")

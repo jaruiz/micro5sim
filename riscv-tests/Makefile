@@ -19,6 +19,8 @@ TEST_SRC = $(basename $(notdir $(TEST_FILES)))
 TEST_OBJ = $(addprefix work/, $(addsuffix .o,$(TEST_SRC)))
 TEST_ELF = $(addprefix work/, $(addsuffix .elf,$(TEST_SRC)))
 TEST_LST = $(addprefix work/, $(addsuffix .lst,$(TEST_SRC)))
+TEST_ROM = $(addprefix work/, $(addsuffix .code,$(TEST_SRC)))
+TEST_RAM = $(addprefix work/, $(addsuffix .data,$(TEST_SRC)))
 
 
 # These tests will NOT be run for the time being. Because they fail.
@@ -30,7 +32,21 @@ CASE_NAMES = $(filter-out $(SKIP_TESTS), $(TEST_SRC))
 CASE_GOALS = $(addprefix work/, $(addsuffix .run,$(CASE_NAMES)))
 
 
+work/%.data: work/%.elf
+	$(RISCV_PREFIX)objcopy \
+		--only-section=.data \
+		--only-section=.data.string \
+		--only-section=.tohost \
+		--gap-fill=0 \
+		-O binary \
+		$< $@
 
+work/%.code: work/%.elf
+	$(RISCV_PREFIX)objcopy \
+		--only-section=.text \
+		--only-section=.text.init \
+		-O binary \
+		$< $@
 
 work/%.lst: work/%.elf
 	$(RISCV_PREFIX)objdump -D $< > $@
@@ -58,7 +74,7 @@ warn-skipped:
 
 
 .PHONY: all
-all: work $(TEST_OBJ) $(TEST_ELF) $(TEST_LST) $(TEST_FILES)
+all: work $(TEST_OBJ) $(TEST_ELF) $(TEST_LST) $(TEST_ROM) $(TEST_RAM) $(TEST_FILES)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,9 +89,30 @@ work/%.run: work/%.elf
 		--rom-addr=0x80000000 \
 		--rom-size=4096 \
 		--ram-addr=0x80004000 \
-		--ram-size=8192 \
+		--ram-size=4096 \
+		--asm-trace=trace.txt \
 		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
-		$<
+		$^
+
+# Same as .run goal but using binary files and not the elf file.
+# Not meant for running the test suite because you need to hardcode the
+# relevant addresses.
+# This is only to help me develop the interface to the RTL TB.
+.PHONY: work/%.run-bin
+work/%.run-bin: work/%.code work/%.data 
+	-python ../micro5sim/cli.py --rom-writeable \
+		--rom-addr=0x80000000 \
+		--rom-size=4096 \
+		--ram-addr=0x80004000 \
+		--ram-size=4096 \
+		--asm-trace=trace.txt \
+		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
+		--binary \
+		--write-to-host=0x80000040 \
+		--signature-begin=0x80004030 \
+		--signature-end=0x800040e0 \
+		$^
+
 
 # Run rv32i suite on ovpsim.
 # You do not need this to get the signature references, those are pre-built.

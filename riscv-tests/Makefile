@@ -66,10 +66,14 @@ all: work $(TEST_OBJ) $(TEST_ELF) $(TEST_LST) $(TEST_FILES)
 .PHONY: run
 run: $(CASE_GOALS) warn-skipped
 
-# Run all elevant tests against micro5sim checking signatures.
+# Run all relevant tests against micro5sim checking signatures.
 .PHONY: work/%.run
 work/%.run: work/%.elf
 	-python ../micro5sim/cli.py --rom-writeable \
+		--rom-addr=0x80000000 \
+		--rom-size=4096 \
+		--ram-addr=0x80004000 \
+		--ram-size=8192 \
 		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
 		$<
 

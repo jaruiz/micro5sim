@@ -87,9 +87,12 @@ class SoC(object):
         self._build_device_tables()
 
 
+    def init(self):
+        self.rom_top = self.rom_bot + len(self.rom)*4
+        self.ram_top = self.ram_bot + len(self.ram)*4
+
+
     def reset(self):
-        self.rom_top = self.rom_bot + len(self.rom)
-        self.ram_top = self.ram_bot + len(self.ram)
         self.cpu.trace_list = self.trace_list
         self.cycles_from_reset = 0
         self.cpu.reset()
@@ -150,7 +153,11 @@ class SoC(object):
                     executable_stuff_at_reset_addr = True
 
             # Find out which area contains this section.
-            if addr >= self.rom_bot and (addr+size) < self.rom_top:
+            if addr >= self.rom_bot and addr < self.rom_top:
+                # Section overlaps ROM area. Fail if not contained in ROM.
+                if not(addr >= self.rom_bot and (addr+size) < self.rom_top):
+                    msg = "Error: Section '%s' partly overlaps ROM area" % (section.name)
+                    raise SoCELFError(msg)
                 # Section is within ROM area.
                 self._print_section_info(section, "ROM")
 
@@ -162,17 +169,20 @@ class SoC(object):
                 # Otherwise just copy the little endian stuff
                 self._load_section_data(section, addr - self.rom_bot, self.rom)
 
-            elif addr >= self.ram_bot and (addr+size) < self.ram_top:
+            elif addr >= self.ram_bot and addr < self.ram_top:
+                # Section overlaps RAM area. Fail if not contained in RAM.
+                if not(addr >= self.ram_bot and (addr+size) < self.ram_top):
+                    msg = "Error: Section '%s' partly overlaps RAM area" % (section.name)
+                    raise SoCELFError(msg)
                 # Section is within RAM area.
                 self._print_section_info(section, "RAM")
                 # Just copy the section to RAM. Even if it is read-only.
                 self._load_section_data(section, addr - self.ram_bot, self.ram)
 
             else:
-                # Not fully contained by ROM or RAM areas.
-                # If there's any overlap then fail, otherwise ignore section.
+                # No overlap to ROM or RAM areas; ignore section.
                 pass
-                # FIXME fail on overlap
+
 
         fi.close()
 
@@ -276,6 +286,8 @@ class SoC(object):
         for j in range(len(data)/4):
             i = j * 4
             word = (data[i+0]<<0) | (data[i+1]<<8) | (data[i+2]<<16) | (data[i+3]<<24)
+            if (j + offset/4) >= len(mem):
+                raise SoCELFError("Data outside memory boundaries")
             mem[j + offset/4] = word
 
 

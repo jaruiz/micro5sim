@@ -158,6 +158,7 @@ def main():
         ram = [0] * opts.ram_size
 
         soc = m5soc.SoC(rom, ram)
+        soc.init()
 
         soc.rom_writeable = opts.rom_writeable
         soc.trace_list = trace_list

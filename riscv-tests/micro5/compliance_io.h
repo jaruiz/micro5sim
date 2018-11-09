@@ -38,7 +38,8 @@
 #define STRINGIFY(x) #x
 #define TOSTRING(x)  STRINGIFY(x)
 
-#define RVTEST_CUSTOM1 0x0005200B
+#define RVTEST_CUSTOM_PUTC  0x0005200B
+#define RVTEST_CUSTOM_SIG   0x0005700B
 
 #ifdef RVTEST_IO_QUIET
 
@@ -66,7 +67,7 @@
     jal         FN_WriteA0; \
 
 #define LOCAL_IO_PUTC(_R)                                               \
-    .word RVTEST_CUSTOM1;                                               \
+    .word RVTEST_CUSTOM_PUTC;                                           \
 
 #define RVTEST_IO_INIT
 

@@ -108,9 +108,6 @@ work/%.run-bin: work/%.code work/%.data
 		--asm-trace=trace.txt \
 		--sig-ref=./riscv-compliance/riscv-test-suite/rv32i/references/$*.reference_output \
 		--binary \
-		--write-to-host=0x80000040 \
-		--signature-begin=0x80004030 \
-		--signature-end=0x800040e0 \
 		$^
 
 

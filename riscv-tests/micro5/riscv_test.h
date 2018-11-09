@@ -121,6 +121,9 @@ handle_exception:                                                       \
         /* some unhandlable exception occurred */                       \
   1:    ori TESTNUM, TESTNUM, 1337;                                     \
   write_tohost:                                                         \
+        la t4, begin_signature;                                         \
+        la t3, end_signature;                                           \
+        .word RVTEST_CUSTOM_SIG;                                        \
         sw TESTNUM, tohost, t5;                                         \
         j write_tohost;                                                 \
 reset_vector:                                                           \

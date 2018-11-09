@@ -127,8 +127,12 @@ def _parse_cmdline():
     parser.add_argument('--asm-trace', type=str, metavar='FILE',
         help="output a trace of executed instructions (disassembly plus register changes)",
         default=None)
+    # FIXME instruction custom-idle to be removed.
     parser.add_argument('--quit-if-idle', action="store_true",
         help="terminate simulation if instruction 'custom-idle' is executed. Defaults to False",
+        default=False)
+    parser.add_argument('--pseudoinstructions', action="store_true",
+        help="enable simulation of pseudoinstructions (host comms mostly). Defaults to False",
         default=False)
     parser.add_argument('--ovpsim-trace', metavar='FILE',
         help="check against a riscvOVPsim trace (trace+traceregs)",
@@ -139,18 +143,6 @@ def _parse_cmdline():
     parser.add_argument('--sig-ref', metavar='FILE',
         help="check signature against reference",
         default=None)
-    parser.add_argument('--write-to-host', metavar="ADDR",
-        help="address where write-to-host operation should be intercepted. " + \
-             "Overrides the value of the symbol read from the elf file, if any." ,
-        type=lambda x: int(x,0), default=None)
-    parser.add_argument('--signature-begin', metavar="ADDR",
-        help="start address of signature area. " + \
-             "Overrides the value of the symbol read from the elf file, if any." ,
-        type=lambda x: int(x,0), default=None)
-    parser.add_argument('--signature-end', metavar="ADDR",
-        help="end address of signature area. " + \
-             "Overrides the value of the symbol read from the elf file, if any." ,
-        type=lambda x: int(x,0), default=None)
 
     args = parser.parse_args()
 
@@ -220,12 +212,7 @@ def main():
             except Exception as e:
                 _error(case_name, "Error reading elf file -- " + str(e), posix.EX_IOERR)
 
-        if opts.write_to_host:
-            soc.intercept(opts.write_to_host)
-        if opts.signature_begin:
-            soc.signature_area(opts.signature_begin, begin=True)
-        if opts.signature_end:
-            soc.signature_area(opts.signature_end, begin=False)
+        soc.cpu.enable_pseudoinstrs = opts.pseudoinstructions
 
         if opts.reg_trace:
             soc.delta_log_file = open(opts.reg_trace, "w")
@@ -243,6 +230,7 @@ def main():
             _error(case_name, str(e), EX_SIG_MISMATCH)
         except (m5soc.SoCQuit, m5cpu.CPUIdle) as e:
             _quit(case_name, str(e), posix.EX_OK)
+
 
     except KeyboardInterrupt:
         print

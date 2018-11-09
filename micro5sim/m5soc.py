@@ -90,6 +90,7 @@ class SoC(object):
         self.signature_reference = None
         self.cycles_from_reset = 0
         self._build_device_tables()
+        self.extended_host_interface = True
 
 
     def init(self):
@@ -104,11 +105,14 @@ class SoC(object):
 
 
     def run(self, num=None):
-        while num == None or num > 0:
-            if num: num -= 1
-            cycles = self.cpu.run()
-            self.cycles_from_reset = self.cycles_from_reset + cycles
-            self._clock_peripherals(cycles)
+        try:
+            while num == None or num > 0:
+                if num: num -= 1
+                cycles = self.cpu.run()
+                self.cycles_from_reset = self.cycles_from_reset + cycles
+                self._clock_peripherals(cycles)
+        except (m5cpu.CPUSignature) as e:
+            self.pseudoinstr_signature()
 
 
     def read_bin(self, filename, rom=True):
@@ -226,19 +230,48 @@ class SoC(object):
         return executable_stuff_at_reset_addr
 
 
-    def intercept(self, addr, symbol_name="write_to_host"):
-        """Override value of symbol _write_to_host."""
-        if symbol_name in SYMBOL_INTERCEPT_FETCH_CALLBACKS:
-            callback = SYMBOL_INTERCEPT_FETCH_CALLBACKS[symbol_name]
-            SYMBOL_INTERCEPT_FETCH[addr] = callback
+    def pseudoinstr_signature(self):
+        """Executed pseudo-instruction to compute signature.
+           We need to compute the signature of stuff between symbols
+           'signature_begin' and 'signature_end'.
+            Either we get the symbol values from the elf file, or if we're
+            using plain binaries we can optionally get the values in
+            registers r29 and r28 -- micro5's version of the test only!
+            In this case where a micro5 pseudoinstruction was used, we
+            will get the values from the registers.
+        """
+        # Expect addresses in registers r29 and r28.
+        sigbot = self.cpu._rbank[29]
+        sigtop = self.cpu._rbank[28]
+        bounds = (sigbot, sigtop)
+        self.write_signature(bounds)
 
 
-    def signature_area(self, addr, begin=True):
-        """Override value of signature begin/end symbols."""
-        if begin:
-            SYMBOL_VALUE['begin_signature'] = addr
-        else:
-            SYMBOL_VALUE['end_signature'] = addr
+    def write_signature(self, bounds=None):
+        """Generate signature file."""
+
+        if self.signature_reference:
+            sig_ref = self._compute_signature(bounds)
+
+            if sig_ref != None:
+                if len(sig_ref) != len(self.signature_reference):
+                    raise SoCQuitSigMismatch("Signature area boundary MISMATCH")
+
+                for i in range(len(sig_ref)):
+                    r0 = sig_ref[i].strip().lower()
+                    r1 = self.signature_reference[i].strip().lower()
+                    if r0 != r1:
+                        raise SoCQuitSigMismatch("Signature MISMATCH")
+
+                raise SoCQuitSigMatch("Signature MATCH")
+
+            else:
+                # This will have raised an exception by now but just in case.
+                raise SoCQuitSigMismatch("Could not compute signature")
+
+        # Intercepted write_tohost but no signature ref on cmd line.
+        raise SoCQuit("No signature reference supplied")
+
 
 
     def _build_device_tables(self):
@@ -272,7 +305,7 @@ class SoC(object):
 
     def _load(self, addr, space='d'):
         if space == 'c' and  addr in SYMBOL_INTERCEPT_FETCH:
-            getattr(self, SYMBOL_INTERCEPT_FETCH[addr])()
+            getattr(self, SYMBOL_INTERCEPT_FETCH[addr])(addr)
 
         if self.rom_bot <= addr < self.rom_top:
             #print "<%08x, %08x, %08x>" % (addr, self.rom_bot, self.rom[0])
@@ -343,35 +376,21 @@ class SoC(object):
             mem[j + offset/4] = word
 
 
-    def _intercept_write_tohost(self):
+    def _intercept_write_tohost(self, addr):
         """Generate signature file."""
 
-        if self.signature_reference:
-            sig_ref = self._compute_signature()
-            
-            if sig_ref != None:
-                if len(sig_ref) != len(self.signature_reference):
-                    raise SoCQuitSigMismatch("Signature area boundary MISMATCH")
-
-                for i in range(len(sig_ref)):
-                    r0 = sig_ref[i].strip().lower()
-                    r1 = self.signature_reference[i].strip().lower()
-                    if r0 != r1:
-                        raise SoCQuitSigMismatch("Signature MISMATCH")
-
-                raise SoCQuitSigMatch("Signature MATCH")
-
-            else:
-                # This will have raised an exception by now but just in case.
-                raise SoCQuitSigMismatch("Could not compute signature")
-    
-        # Intercepted write_tohost but no signature ref on cmd line.
-        raise SoCQuit("No signature reference supplied")
+        # If we intercept a symbol fetch, assume we got the area boundaries
+        # from the elf file too and don't use the registers.
+        self.write_signature()
 
 
-    def _compute_signature(self):
-        sig_bot = SYMBOL_VALUE['begin_signature']
-        sig_top = SYMBOL_VALUE['end_signature']
+    def _compute_signature(self, bounds=None):
+
+        if bounds == None:
+            sig_bot = SYMBOL_VALUE['begin_signature']
+            sig_top = SYMBOL_VALUE['end_signature']
+        else:
+            (sig_bot, sig_top) = bounds
 
         sig_ref = None
 
@@ -381,6 +400,9 @@ class SoC(object):
             raise SoCQuitSigMismatch("Can't build signature file: missing symbol 'end_signature'")
         elif sig_bot > sig_top:
             raise SoCQuitSigMismatch("Can't build signature file: begin and end symbols reversed")
+        elif (sig_bot > self.rom_top and sig_bot > self.ram_top) or \
+             (sig_top > self.rom_top and sig_top > self.ram_top):
+            raise SoCQuitSigMismatch("Can't build signature file: begin and/or end symbols out of bounds")
         else:
             # Area seems legit. Compute signature as list of ascii lines.
             print "Computing signature for area [0x%08x .. 0x%08x]" % (sig_bot, sig_top)

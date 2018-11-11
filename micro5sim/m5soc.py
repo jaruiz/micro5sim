@@ -343,8 +343,11 @@ class SoC(object):
             self.dev_by_addr[addr].write(addr, value, lanes)
 
 
-    def _log_delta(self, pc, index, value):
-        delta = "%08x: r%02d=%08x" % (pc, index, value)
+    def _log_delta(self, pc, index, value, csr=False):
+        if csr:
+            delta = "%08x: csr%03x=%08x" % (pc, index, value)
+        else:
+            delta = "%08x: r%02d=%08x" % (pc, index, value)
         if self.delta_log_file:
             print >> self.delta_log_file, delta
         return delta

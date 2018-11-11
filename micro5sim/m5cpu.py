@@ -313,9 +313,10 @@ class CPU(object):
 
     def _write_csr(self, csr, value):
         if csr in CSR:
+            if CSR[csr] != value:
+                self._log_delta(self.PC, csr, value, csr=True)
             # FIXME hook side effects
             CSR[csr] = value
-            self._log_delta(self.PC, csr, value, csr=True)
         else:
             self._unimplemented_csr(csr)
 
@@ -573,16 +574,18 @@ class CPU(object):
 
     def _op_ecall(self, rs1):
         # FIXME check rs1, rd are zero
+        if CSR[CSR_MTVAL] != 0:
+            self._log_delta(self.PC, CSR_MTVAL, 0, csr=True)
         CSR[CSR_MTVAL] = 0
-        self._log_delta(self.PC, CSR_MTVAL, 0, csr=True)
         self._do_trap(0x0b)
         self._asm = "ecall %s" % (RN[self._rs1])
 
 
     def _op_ebreak(self, rs1):
         # FIXME check rs1, rd are zero
+        if CSR[CSR_MTVAL] != self.PC:
+            self._log_delta(self.PC, CSR_MTVAL, self.PC, csr=True)
         CSR[CSR_MTVAL] = self.PC
-        self._log_delta(self.PC, CSR_MTVAL, self.PC, csr=True)
         self._do_trap(0x03)
         self._asm = "ebreak %s" % (RN[self._rs1])
 
